@@ -202,10 +202,13 @@ describe("individual pick mode", () => {
     expect(new Set(items.map((i) => i.id)).size).toBe(items.length);
   });
 
-  it("individual-pick variants are registered alongside the scripted ones", () => {
+  it("single-pick variants are registered alongside the scripted ones", () => {
+    // renamed from -individual to -single: the old variant only hovered and never
+    // completed a pick. See single-pick.test.ts for the behavioural guarantees.
     for (const id of ids) {
       expect(showcaseById(id), id).toBeDefined();
-      expect(ALL_SCENARIOS.some((x) => x.id === `${id}-individual`), `${id}-individual`).toBe(true);
+      expect(ALL_SCENARIOS.some((x) => x.id === `${id}-single`), `${id}-single`).toBe(true);
+      expect(ALL_SCENARIOS.some((x) => x.id === `${id}-individual`), `${id}-individual`).toBe(false);
     }
   });
 

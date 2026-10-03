@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import { showcaseItems, SHOWCASE_SCRIPT } from "@/playground/scenarios/showcase";
 import { CONTROL_PANEL_NOTE, type PickTarget } from "@/playground/scenarios/individpick";
+import { requestPick, clearPick } from "@/playground/scenarios/single-pick";
 import { resolvePick, examplePhrases, type PickCommand } from "@/playground/scenarios/pick-command";
 
 const Loading = () => <p className="p-6 text-sm text-slate-500">Loading 3D engine…</p>;
@@ -25,7 +26,9 @@ export default function ControlPanel() {
   const items = useMemo(() => showcaseItems(), []);
   const [mode, setMode] = useState<Mode>("individual");
   const [selected, setSelected] = useState<string>(items[0]?.id ?? "");
-  const [scenario, setScenario] = useState(items[0]?.scenario ?? "");
+  // Always drive the single-pick variant so one request = one fetch.
+  const [base, setBase] = useState(items[0]?.scenario ?? "");
+  const scenario = `${base}-single`;
   const [busy, setBusy] = useState(false);
 
   // Group by domain so the picker reads like a work order, not a flat dump.
@@ -77,8 +80,10 @@ export default function ControlPanel() {
     setCmd(c);
     if (c.action === "pick" || c.action === "place") {
       if (c.targetId) {
+        const [sid, pid] = c.targetId.split(":");
         setSelected(c.targetId);
-        setScenario(c.targetId.split(":")[0]);
+        setBase(sid);
+        requestPick(pid ?? c.targetId, c.action);
       }
       void say(`Fetching ${c.label}.`);
     } else if (c.action === "sequence") {
@@ -184,6 +189,16 @@ export default function ControlPanel() {
                   {listening ? "🎙️ …" : "🎤"}
                 </button>
                 <button
+                  onClick={() => {
+                    clearPick();
+                    setBusy(false);
+                  }}
+                  title="Stop and hold"
+                  className="rounded border border-rose-800 px-3 py-2 text-sm text-rose-300 hover:bg-rose-950/50"
+                >
+                  ⏹ hold
+                </button>
+                <button
                   onClick={() => setNarrate((n) => !n)}
                   title={narrate ? "Narration on" : "Narration off"}
                   className={`rounded border px-3 py-2 text-sm ${
@@ -238,7 +253,8 @@ export default function ControlPanel() {
                       <button
                         onClick={() => {
                           setSelected(it.id);
-                          setScenario(it.scenario);
+                          setBase(it.scenario);
+                          requestPick(it.id.split(":")[1] ?? it.id, "pick");
                         }}
                         className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
                           selected === it.id
@@ -273,11 +289,12 @@ export default function ControlPanel() {
                   <button
                     disabled={busy}
                     onClick={() => {
+                      if (!current) return;
+                      requestPick(current.id.split(":")[1] ?? current.id, "pick");
                       setBusy(true);
-                      // The Playground reads the request via the scenario program;
-                      // this only reflects that a request is in flight.
                       void say(`Fetching ${current.label}.`);
-                      setTimeout(() => setBusy(false), 1200);
+                      // The motion runs in the sim's live program, not here.
+                      window.setTimeout(() => setBusy(false), 4000);
                     }}
                     className="ml-auto rounded bg-amber-500 px-3 py-1.5 font-semibold text-slate-900 disabled:opacity-50"
                   >
