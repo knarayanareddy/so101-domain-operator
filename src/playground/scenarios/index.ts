@@ -3,9 +3,14 @@ import { creativeScenarios } from './creative';
 import { helpfulScenarios } from './helpful';
 import { industryScenarios, labScenarios } from './industry';
 import { showcaseScenarios } from './showcase';
+import { withIndividualPicks } from './individpick';
+
+const showcase = showcaseScenarios();
 
 export const ALL_SCENARIOS: Scenario[] = [
-  ...showcaseScenarios(),
+  ...showcase,
+  // Individual-pick variants: same scene, driven one item at a time.
+  ...showcase.map(withIndividualPicks),
   ...labScenarios,
   ...creativeScenarios,
   ...helpfulScenarios,

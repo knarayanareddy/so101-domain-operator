@@ -29,6 +29,10 @@ __pycache__/
 .venv/
 venv/
 
+# TypeScript incremental build cache (next-env.d.ts IS tracked — Next regenerates it
+# and the build expects it present)
+*.tsbuildinfo
+
 # Editor
 .vscode/
 .idea/

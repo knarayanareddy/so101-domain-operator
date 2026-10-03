@@ -17,11 +17,13 @@ const Overview = dynamic(() => import("./Overview"), { ssr: false, loading: Load
 const ExplodedView = dynamic(() => import("./ExplodedView"), { ssr: false, loading: Loading });
 const BuildGuide = dynamic(() => import("./BuildGuide"), { ssr: false, loading: Loading });
 const Playground = dynamic(() => import("./Playground"), { ssr: false, loading: Loading });
+const ControlPanel = dynamic(() => import("./ControlPanel"), { ssr: false, loading: Loading });
 
-type Sub = "playground" | "exploded" | "build" | "overview";
+type Sub = "playground" | "panel" | "exploded" | "build" | "overview";
 
 const SUBS: { id: Sub; label: string; icon: string }[] = [
   { id: "playground", label: "Simulation playground", icon: "🕹️" },
+  { id: "panel", label: "Control panel", icon: "🎛️" },
   { id: "exploded", label: "Exploded 3D view", icon: "🔩" },
   { id: "build", label: "Illustrated build guide", icon: "🛠️" },
   { id: "overview", label: "Scenario catalogue", icon: "🏠" },
@@ -53,6 +55,7 @@ export function LabTab() {
       </nav>
       <div className="-mx-4 rounded-lg">
         {sub === "playground" && <Playground key={scenario ?? "default"} initial={scenario} />}
+        {sub === "panel" && <ControlPanel />}
         {sub === "exploded" && (
           <ExplodedView
             onGoBuild={(step) => {
