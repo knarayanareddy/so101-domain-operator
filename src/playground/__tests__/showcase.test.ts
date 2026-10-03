@@ -125,7 +125,14 @@ describe("five-domain showcase registry", () => {
 
   it("still claims no person detection", () => {
     for (const s of showcaseScenarios()) {
-      const text = `${s.story} ${s.novelty} ${s.code} ${s.howTo.join(" ")}`.toLowerCase();
+      // Strip explicit DISCLAIMERS first — the assistive scenario legitimately says
+      // "does NOT do: detect people", and matching that would fail a correct scene.
+      const raw = `${s.story} ${s.novelty} ${s.code} ${s.howTo.join(" ")}`.toLowerCase();
+      const text = raw
+        .replace(/not do: detect people/g, "")
+        .replace(/not person detection/g, "")
+        .replace(/taped marks?, not person detection/g, "")
+        .replace(/person detection/g, (m, i: number) => (raw.slice(Math.max(0, i - 24), i).includes("not ") ? "" : m));
       expect(text.match(/detect (a )?person|person detection|face detect/), s.id).toBeNull();
     }
     expect(showcaseById("assistive-handover")!.code).toMatch(/NOT do: detect people/i);
@@ -215,5 +222,73 @@ describe("individual pick mode", () => {
   it("the demo script exposes both modes", () => {
     expect(SHOWCASE_SCRIPT).toHaveLength(5);
     expect(SHOWCASE_SCRIPT.filter((s) => s.live)).toHaveLength(1);
+  });
+});
+
+
+describe("layout spread: parts must be individually readable", () => {
+  const dist = (a: [number, number, number], b: [number, number, number]) =>
+    Math.hypot(a[0] - b[0], a[2] - b[2]);
+
+  it("every domain keeps its parts well separated", () => {
+    // Reported: parts were crowded with overlapping labels. Solved for maximum
+    // separation inside the reach envelope rather than eyeballed.
+    const MIN_GAP: Record<string, number> = {
+      "phone-repair": 18,
+      "pcb-assembly": 18,
+      "lab-samples": 18,
+      "assistive-handover": 25,
+      "restock-kiosk": 10,
+    };
+    const problems: string[] = [];
+    for (const s of showcaseScenarios()) {
+      const pts = (s.props ?? []).filter((p) => p.grab).map((p) => p.pos);
+      const need = MIN_GAP[s.id] ?? 12;
+      for (let i = 0; i < pts.length; i++) {
+        for (let j = i + 1; j < pts.length; j++) {
+          const d = dist(pts[i], pts[j]);
+          if (d < need) problems.push(`${s.id}: item ${i}-${j} only ${d.toFixed(1)} cm apart (need ${need})`);
+        }
+      }
+    }
+    expect(problems, problems.join("\n")).toEqual([]);
+  });
+
+  it("spreading them did not push anything out of reach", () => {
+    for (const s of showcaseScenarios()) {
+      // A one-arm scene must be served by arm A. A two-arm scene may use either.
+      const needsA = s.arms === 1;
+      for (const p of s.props ?? []) {
+        if (!p.grab) continue;
+        const dA = Math.hypot(p.pos[0] - A_BASE[0], p.pos[2] - A_BASE[2]);
+        const dB = Math.hypot(p.pos[0] - B_BASE[0], p.pos[2] - B_BASE[2]);
+        const reachable = needsA ? dA <= REACH - MARGIN : Math.min(dA, dB) <= REACH - MARGIN;
+        expect(reachable, `${s.id}/${p.id} at ${dA.toFixed(1)}/${dB.toFixed(1)} cm`).toBe(true);
+      }
+    }
+  });
+
+  it("label cards are offset from parts, not stacked on them", () => {
+    // Overlapping labels were the visible symptom; cards must sit beside the part.
+    for (const s of showcaseScenarios()) {
+      const cards = (s.fixtures ?? []).filter((f) => f.label && /battery|screen|logic board|sample|crate/i.test(f.label));
+      for (const c of cards) {
+        const near = (s.props ?? []).some((p) => Math.hypot(c.pos[0] - p.pos[0], c.pos[2] - p.pos[2]) < 2.5);
+        expect(near, `${s.id}: label "${c.label}" sits on top of a part`).toBe(false);
+      }
+    }
+  });
+
+  it("each domain uses its own component geometry, not generic shapes", () => {
+    // battery/screen/board, reels, tubes, cup+magazine, crates — five distinct sets.
+    const sigs = showcaseScenarios().map((s) =>
+      (s.props ?? []).map((p) => `${p.shape}:${(p.size ?? []).join("x")}`).sort().join("|"),
+    );
+    expect(new Set(sigs).size, "two domains share identical geometry").toBe(sigs.length);
+    for (const s of showcaseScenarios()) {
+      for (const p of s.props ?? []) {
+        expect((p.children as unknown[] | undefined)?.length ?? 0, `${s.id}/${p.id} is a bare shape`).toBeGreaterThan(0);
+      }
+    }
   });
 });
