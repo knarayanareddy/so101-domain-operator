@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* --- Sim Lab (ported from so-101-robot-assembly-and-simulation) --- */
+html,
+body {
+  margin: 0;
+  background: #020617;
+  color-scheme: dark;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+select option {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}

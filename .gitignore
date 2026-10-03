@@ -1,0 +1,38 @@
+# Dependencies
+/node_modules
+
+# Next.js build output
+/.next
+/out
+/.turbopack
+
+# Anchored on purpose. A bare "build/" or "dist/" matches at ANY depth and will
+# silently drop real source (this repo has src/app/api/... routes). Keep the slash.
+# Env files
+.env
+.env*.local
+
+# Runtime / machine-specific — never belongs in the shared workspace
+*.log
+*.pid
+.DS_Store
+Thumbs.db
+
+# Local agent / evidence dirs (harness state, not product)
+.omh/
+.omo/
+.omx/
+
+# Python tooling used by tools/*.py (the venv lives outside the repo, but be safe)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# NOTE: no *.pt model weights. If vision-replay lands, weights go to a release
+# asset or a fetch script — not into git history.
