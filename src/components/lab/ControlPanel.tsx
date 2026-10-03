@@ -46,6 +46,25 @@ export default function ControlPanel() {
   const [cmd, setCmd] = useState<PickCommand | null>(null);
   const [heard, setHeard] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
+  const [narrate, setNarrate] = useState(true);
+  const [spoken, setSpoken] = useState<string | null>(null);
+
+  /** Narrate via local TTS. Advisory: a failure must never block motion, so it
+   *  updates the last-spoken indicator and nothing else. */
+  const say = async (text: string) => {
+    if (!narrate || !text) return;
+    try {
+      const res = await fetch("/api/speak", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = (await res.json()) as { ok?: boolean };
+      setSpoken(data.ok ? text : null);
+    } catch {
+      setSpoken(null);
+    }
+  };
 
   const catalogue = useMemo(() => items as PickTarget[], [items]);
   const phrases = useMemo(() => examplePhrases(catalogue), [catalogue]);
@@ -61,6 +80,11 @@ export default function ControlPanel() {
         setSelected(c.targetId);
         setScenario(c.targetId.split(":")[0]);
       }
+      void say(`Fetching ${c.label}.`);
+    } else if (c.action === "sequence") {
+      void say("Running the full work order.");
+    } else {
+      void say("I could not tell which part you meant.");
     }
   };
 
@@ -159,6 +183,17 @@ export default function ControlPanel() {
                 >
                   {listening ? "🎙️ …" : "🎤"}
                 </button>
+                <button
+                  onClick={() => setNarrate((n) => !n)}
+                  title={narrate ? "Narration on" : "Narration off"}
+                  className={`rounded border px-3 py-2 text-sm ${
+                    narrate
+                      ? "border-emerald-600 text-emerald-300"
+                      : "border-slate-700 text-slate-500"
+                  }`}
+                >
+                  {narrate ? "🔊 on" : "🔇 off"}
+                </button>
               </div>
 
               {cmd && (
@@ -178,6 +213,7 @@ export default function ControlPanel() {
                 </div>
               )}
               {heard && <p className="mt-1 text-xs text-slate-500">heard: "{heard}"</p>}
+              {spoken && <p className="mt-1 text-xs text-emerald-500/80">narrated: "{spoken}"</p>}
 
               <div className="mt-2 flex flex-wrap gap-1">
                 {phrases.map((p) => (
@@ -240,6 +276,7 @@ export default function ControlPanel() {
                       setBusy(true);
                       // The Playground reads the request via the scenario program;
                       // this only reflects that a request is in flight.
+                      void say(`Fetching ${current.label}.`);
                       setTimeout(() => setBusy(false), 1200);
                     }}
                     className="ml-auto rounded bg-amber-500 px-3 py-1.5 font-semibold text-slate-900 disabled:opacity-50"
