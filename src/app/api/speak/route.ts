@@ -13,6 +13,8 @@ const exec = promisify(execFile);
  * model is missing is worse than a silent one. Callers should treat a failure as
  * "no narration", never as a motion-blocking error.
  */
+// Excluded from the static export via next.config.ts (STATIC_EXPORT=1) by moving
+// this route file aside — see scripts/build-static.sh.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 

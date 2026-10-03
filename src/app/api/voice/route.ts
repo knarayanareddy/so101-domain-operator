@@ -14,6 +14,8 @@ const exec = promisify(execFile);
  * This route is deliberately dumb: no intent classification here, so the same
  * resolver can be unit-tested without a server.
  */
+// Excluded from the static export via next.config.ts (STATIC_EXPORT=1) by moving
+// this route file aside — see scripts/build-static.sh.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 

@@ -107,8 +107,8 @@ export default function ControlPanel() {
         setHeard(data.text);
         submit(data.text);
       }
-    } catch (e) {
-      setHeard(e instanceof Error ? `voice failed: ${e.message}` : "voice failed");
+    } catch {
+      setHeard("voice needs the local server (npm run dev) — type the command instead");
     } finally {
       setListening(false);
     }

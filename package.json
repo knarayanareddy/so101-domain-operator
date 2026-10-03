@@ -12,7 +12,8 @@
     "test:live": "LIVE_ALL=1 vitest run src/lib/__tests__/all-missions-live.test.ts",
     "so101": "esbuild tools/so101.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/so101.mjs --external:serialport --log-level=warning && node node_modules/.cache/so101.mjs",
     "yolo": "~/.so101/yolo-venv/bin/python tools/yolo_watch.py",
-    "yolo:selftest": "~/.so101/yolo-venv/bin/python tools/yolo_watch.py --selftest"
+    "yolo:selftest": "~/.so101/yolo-venv/bin/python tools/yolo_watch.py --selftest",
+    "build:static": "bash scripts/build-static.sh"
   },
   "dependencies": {
     "dotenv": "17.3.1",

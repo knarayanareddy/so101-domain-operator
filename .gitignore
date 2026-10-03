@@ -1,10 +1,13 @@
 # Dependencies
 /node_modules
 
-# Next.js build output
+# Next.js build output. /out is the static export; Pages builds it in CI,
+# so it must never be committed. /github-pages is the legacy artifact dir.
 /.next
 /out
 /.turbopack
+/.vercel
+/github-pages
 
 # Anchored on purpose. A bare "build/" or "dist/" matches at ANY depth and will
 # silently drop real source (this repo has src/app/api/... routes). Keep the slash.

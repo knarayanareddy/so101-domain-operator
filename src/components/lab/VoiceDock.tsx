@@ -98,6 +98,9 @@ export default function VoiceDock() {
   const listen = useCallback(async () => {
     setStatus("listening");
     try {
+      // Static hosts have no /api/voice: it shells out to a LOCAL python tool, and
+      // a browser cannot spawn a process. Say so plainly instead of hanging on a
+      // 404 the operator cannot diagnose.
       const res = await fetch("/api/voice", { method: "POST" });
       const data = (await res.json()) as { text?: string; error?: string };
       if (data.error) throw new Error(data.error);
@@ -108,7 +111,7 @@ export default function VoiceDock() {
         push("? heard nothing");
       }
     } catch (e) {
-      push(`? voice failed: ${e instanceof Error ? e.message : "unknown"}`);
+      push("? voice needs the local server (npm run dev) — type the command instead");
     } finally {
       setStatus("idle");
     }
