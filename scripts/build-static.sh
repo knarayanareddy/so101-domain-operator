@@ -17,7 +17,17 @@
 # =============================================================================
 set -euo pipefail
 
-PROJ="${SO101_PROJECT:-$HOME/.so101/deck}"
+# BUG FIXED: this defaulted to $HOME/.so101/deck, which exists on this Mac but not
+# in CI. GitHub Actions failed with "cd: /home/runner/.so101/deck: No such file or
+# directory". In CI the script runs from the checkout, so GITHUB_WORKSPACE (or the
+# current directory) is the correct answer; the override stays for local use.
+if [ -n "${GITHUB_WORKSPACE:-}" ] && [ -d "${GITHUB_WORKSPACE}/src/app" ]; then
+  PROJ="${GITHUB_WORKSPACE}"
+elif [ -f ./src/app/api/voice/route.ts ] || [ -d ./src/app/api ]; then
+  PROJ="$(pwd)"
+else
+  PROJ="${SO101_PROJECT:-$HOME/.so101/deck}"
+fi
 OUT="${1:-$PROJ/out}"
 REPO="${NEXT_PUBLIC_REPO:-so101-domain-operator}"
 STASH=""
