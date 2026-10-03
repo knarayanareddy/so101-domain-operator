@@ -55,11 +55,10 @@ for r in voice speak state health; do
   fi
 done
 
-# GitHub Pages serves the published directory at the ROOT of the hostname, so the
-# default is an EMPTY basePath — Next rejects "/" outright ("basePath has to be
-# either an empty string or a path prefix"). Pass /<repo> only if you will serve
-# the site exclusively under that sub-path.
-BASE_PATH="${BASE_PATH:-}"
+# A GitHub Pages PROJECT site is served at /<repo>/, so the asset prefix must
+# include the repo or every /_next chunk 404s (verified: white page). Next rejects
+# "/" so pass the real prefix. Override with BASE_PATH="" only for a user/org page.
+BASE_PATH="${BASE_PATH:-/$REPO}"
 echo "[build-static] building with BASE_PATH=${BASE_PATH:-<none, served at root>}"
 STATIC_EXPORT=1 NEXT_PUBLIC_REPO="$REPO" NEXT_PUBLIC_BASE_PATH="$BASE_PATH" \
   npx next build

@@ -44,18 +44,20 @@ const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? `/${repo}`;
 const isStatic = process.env.STATIC_EXPORT === "1";
 
 /**
- * basePath only when the deployed site really lives under a sub-path.
+ * basePath must match where GitHub Pages actually SERVES the files.
  *
- * GitHub Pages publishes whatever is in the published directory at the ROOT of
- * the served hostname. For a project site that means the site is reachable at
- * BOTH:
- *   https://<user>.github.io/          (Pages also maps the repo root here)
- *   https://<user>.github.io/<repo>/   (the canonical project URL)
- * Whichever prefix Next bakes in must match the URL the visitor uses, so we make
- * it explicit rather than guessing: default "/" (works at the root), and set
- * NEXT_PUBLIC_BASE_PATH=/<repo> only if the site is served under that path.
+ * A project site is served at https://<user>.github.io/<repo>/ — NOT at the
+ * hostname root. Verified 2026-10-03 against the live deployment: with an empty
+ * basePath the exported HTML requested /_next/static/chunks/*.js at the domain
+ * root and every chunk 404'd, giving a white page with only the server-rendered
+ * text and a few tab labels. Pages resolves the published directory relative to
+ * the repo path, so basePath must include it.
+ *
+ * Next rejects "/" outright ("basePath has to be either an empty string or a path
+ * prefix"), hence the normalisation below.
  */
-const applyBase = isStatic && process.env.NEXT_PUBLIC_BASE_PATH;
+const rawBase = process.env.NEXT_PUBLIC_BASE_PATH ?? basePath;
+const applyBase = isStatic && rawBase && rawBase !== "/" ? rawBase : undefined;
 
 const nextConfig: NextConfig = {
   ...(isStatic ? { output: "export" as const, trailingSlash: true, images: { unoptimized: true } } : {}),
