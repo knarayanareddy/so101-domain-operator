@@ -211,6 +211,10 @@ function pcbAssembly(): Scenario {
     return {
       id: r.id,
       ...at(reel.prim, rx, 0, rz + r.off),
+      // The catalogue surfaces this label, so it must identify the PART, not the
+      // container. Three items all called "reel" would be indistinguishable to
+      // "pick up the resistor".
+      label: r.label,
       grab: true,
       width: reel.grabWidth,
     } as PropSpec;
@@ -295,6 +299,7 @@ function labSamples(): Scenario {
     return {
       id: s.id,
       ...at(tube.prim, qx, 0, qz + s.off),
+      label: `sample ${s.label}`,   // "sample A1", not three identical "sample"s
       grab: true,
       width: tube.grabWidth,
     } as PropSpec;
@@ -468,6 +473,7 @@ function restockKiosk(): Scenario {
     return {
       id: `stock-${s.id}`,
       ...at(crate.prim, cx, 0, cz + s.off),
+      label: `crate for ${s.label}`, // distinguishes four identical crates
       grab: true,
       width: crate.grabWidth,
     } as PropSpec;

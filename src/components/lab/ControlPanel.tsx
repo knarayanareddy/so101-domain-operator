@@ -3,7 +3,8 @@
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import { showcaseItems, SHOWCASE_SCRIPT } from "@/playground/scenarios/showcase";
-import { CONTROL_PANEL_NOTE } from "@/playground/scenarios/individpick";
+import { CONTROL_PANEL_NOTE, type PickTarget } from "@/playground/scenarios/individpick";
+import { resolvePick, examplePhrases, type PickCommand } from "@/playground/scenarios/pick-command";
 
 const Loading = () => <p className="p-6 text-sm text-slate-500">Loading 3D engine…</p>;
 const Playground = dynamic(() => import("./Playground"), { ssr: false, loading: Loading });
@@ -39,6 +40,50 @@ export default function ControlPanel() {
   }, [items]);
 
   const current = items.find((i) => i.id === selected);
+
+  // --- natural-language / voice command ---
+  const [utterance, setUtterance] = useState("");
+  const [cmd, setCmd] = useState<PickCommand | null>(null);
+  const [heard, setHeard] = useState<string | null>(null);
+  const [listening, setListening] = useState(false);
+
+  const catalogue = useMemo(() => items as PickTarget[], [items]);
+  const phrases = useMemo(() => examplePhrases(catalogue), [catalogue]);
+
+  const submit = (text: string) => {
+    const u = text.trim();
+    if (!u) return;
+    const c = resolvePick(u, catalogue);
+    setUtterance(u);
+    setCmd(c);
+    if (c.action === "pick" || c.action === "place") {
+      if (c.targetId) {
+        setSelected(c.targetId);
+        setScenario(c.targetId.split(":")[0]);
+      }
+    }
+  };
+
+  // Voice capture goes through the local STT service; it never drives the arm
+  // directly, it only fills the same text box a typed request would.
+  const listen = async () => {
+    setListening(true);
+    setHeard(null);
+    try {
+      const res = await fetch("/api/voice", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { text?: string; error?: string };
+      if (data.error) throw new Error(data.error);
+      if (data.text) {
+        setHeard(data.text);
+        submit(data.text);
+      }
+    } catch (e) {
+      setHeard(e instanceof Error ? `voice failed: ${e.message}` : "voice failed");
+    } finally {
+      setListening(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -86,7 +131,68 @@ export default function ControlPanel() {
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[320px,1fr]">
-          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 max-h-[70vh] overflow-auto">
+          <div className="space-y-3">
+            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+              <label htmlFor="nl-command" className="text-xs uppercase tracking-wide text-slate-500">
+                Tell it what to pick up
+              </label>
+              <div className="mt-2 flex gap-2">
+                <input
+                  id="nl-command"
+                  value={utterance}
+                  onChange={(e) => setUtterance(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && submit(utterance)}
+                  placeholder="pick up the resistor"
+                  className="flex-1 rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none"
+                />
+                <button
+                  onClick={() => submit(utterance)}
+                  className="rounded bg-amber-500 px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-amber-400"
+                >
+                  Resolve
+                </button>
+                <button
+                  onClick={listen}
+                  disabled={listening}
+                  title="Speak a command (local STT, offline)"
+                  className="rounded border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {listening ? "🎙️ …" : "🎤"}
+                </button>
+              </div>
+
+              {cmd && (
+                <div
+                  className={`mt-2 rounded px-3 py-2 text-xs ${
+                    cmd.action === "unknown"
+                      ? "bg-amber-500/10 text-amber-300"
+                      : "bg-emerald-500/10 text-emerald-300"
+                  }`}
+                >
+                  <strong>{cmd.action}</strong> — {cmd.reason}
+                  {cmd.candidates.length > 0 && (
+                    <div className="mt-1 text-slate-400">
+                      Did you mean: {cmd.candidates.join(", ")}?
+                    </div>
+                  )}
+                </div>
+              )}
+              {heard && <p className="mt-1 text-xs text-slate-500">heard: "{heard}"</p>}
+
+              <div className="mt-2 flex flex-wrap gap-1">
+                {phrases.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => submit(p)}
+                    className="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] text-slate-400 hover:border-amber-500 hover:text-amber-300"
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 max-h-[52vh] overflow-auto">
             {byDomain.map(([domain, list]) => (
               <div key={domain} className="mb-4 last:mb-0">
                 <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{domain}</h3>
@@ -117,6 +223,7 @@ export default function ControlPanel() {
                 </ul>
               </div>
             ))}
+          </div>
           </div>
 
           <div className="space-y-3">
