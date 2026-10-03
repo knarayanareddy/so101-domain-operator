@@ -22,6 +22,8 @@ export function VisionTab() {
   const detsRef = useRef(dets);
   detsRef.current = dets;
   const testRef = useRef(test);
+  const detectorModeRef = useRef(data.detectMode === "detector");
+  detectorModeRef.current = data.detectMode === "detector";
   testRef.current = test;
 
   useEffect(() => {
@@ -46,11 +48,45 @@ export function VisionTab() {
         ctx.fillStyle = ctx.strokeStyle;
         ctx.fillText(`${m.world.x},${m.world.y}`, m.px.x + 9, m.px.y - 9);
       }
+      // Colour/diff detections are solid green and calibrated. Detector detections
+      // are dashed cyan with a "?" — they are open-vocabulary proposals with no
+      // confidence score, and must not read as confirmed the way a colour blob does.
+      const fromDetector = marksRef.current.length > 0 && detectorModeRef.current;
       for (const d of detsRef.current) {
-        ctx.strokeStyle = "#a3e635";
-        ctx.strokeRect(d.bbox[0], d.bbox[1], d.bbox[2] - d.bbox[0], d.bbox[3] - d.bbox[1]);
-        ctx.fillStyle = "#a3e635";
-        ctx.fillText(`${d.label}${d.world ? ` (${d.world.x.toFixed(1)}, ${d.world.y.toFixed(1)})` : ""}`, d.bbox[0], d.bbox[1] - 4);
+        const [x0, y0, x1, y1] = d.bbox;
+        const w = x1 - x0;
+        const h = y1 - y0;
+        if (fromDetector) {
+          ctx.save();
+          ctx.setLineDash([5, 4]);
+          ctx.strokeStyle = "#22d3ee";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x0, y0, w, h);
+          ctx.restore();
+          // crosshair at the centroid: that is the point the arm would target
+          ctx.strokeStyle = "#22d3ee";
+          ctx.beginPath();
+          ctx.moveTo(d.px.x - 6, d.px.y);
+          ctx.lineTo(d.px.x + 6, d.px.y);
+          ctx.moveTo(d.px.x, d.px.y - 6);
+          ctx.lineTo(d.px.x, d.px.y + 6);
+          ctx.stroke();
+          ctx.fillStyle = "#22d3ee";
+          ctx.font = "bold 12px sans-serif";
+          ctx.fillText(`? ${d.label}`, x0, Math.max(12, y0 - 4));
+          ctx.font = "11px sans-serif";
+          ctx.fillText(
+            d.world ? `${d.world.x.toFixed(1)}, ${d.world.y.toFixed(1)} cm` : "uncalibrated",
+            x0,
+            Math.max(24, y0 - 18),
+          );
+        } else {
+          ctx.strokeStyle = "#a3e635";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x0, y0, w, h);
+          ctx.fillStyle = "#a3e635";
+          ctx.fillText(`${d.label}${d.world ? ` (${d.world.x.toFixed(1)}, ${d.world.y.toFixed(1)})` : ""}`, x0, y0 - 4);
+        }
       }
       const t = testRef.current;
       if (t) {
@@ -226,6 +262,62 @@ export function VisionTab() {
               </li>
             ))}
           </ul>
+
+      {/* ---- Open-vocabulary detector (advisory) ---- */}
+      <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-xs font-semibold text-slate-200">
+            <input
+              type="checkbox"
+              className="mr-2 accent-lime-400"
+              checked={data.detectMode === "detector"}
+              onChange={(e) => update({ detectMode: e.target.checked ? "detector" : "color" })}
+            />
+            Open-vocabulary detector (Florence-2)
+          </label>
+          <span
+            className={`rounded px-2 py-0.5 text-[10px] ${
+              data.detector.ready ? "bg-lime-500/20 text-lime-300" : "bg-slate-700 text-slate-400"
+            }`}
+          >
+            {data.detector.ready ? "ready" : "offline"}
+          </span>
+        </div>
+
+        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+          Names the parts actually on your bench. Comma-separated &mdash; the server runs one pass
+          per label, because Florence-2 collapses a multi-label prompt to a single box.
+        </p>
+
+        <input
+          value={data.detectorPrompt}
+          onChange={(e) => update({ detectorPrompt: e.target.value })}
+          placeholder="a resistor, a capacitor, a phone screen"
+          className="mt-1.5 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:border-lime-500 focus:outline-none"
+        />
+
+        {data.detector.error && (
+          <p className="mt-1.5 text-[11px] text-amber-400">
+            Detector unavailable: {data.detector.error}. Showing colour detection instead &mdash; no
+            boxes are invented.
+          </p>
+        )}
+
+        <div className="mt-1.5 flex flex-wrap gap-2 text-[10px] text-slate-500">
+          {data.detector.lastMs != null && <span>{data.detector.lastMs}ms</span>}
+          {data.detector.dropped > 0 && (
+            <span className="text-amber-400">{data.detector.dropped} dropped as implausible</span>
+          )}
+          {data.detector.labels.length > 0 && <span>asked: {data.detector.labels.join(", ")}</span>}
+        </div>
+
+        <p className="mt-2 border-t border-slate-800 pt-2 text-[10px] leading-relaxed text-slate-500">
+          <b className="text-slate-400">Advisory.</b> Florence-2 returns the label you asked for
+          whether or not the object exists, and emits no confidence score &mdash; so a box is not
+          proof the part is there. Targets outside the arm&apos;s reach are dropped, and motion still
+          requires the motor stall check.
+        </p>
+      </div>
           <div className="mt-2 text-xs text-slate-400">{dets.length} detection(s): {dets.map((d) => d.label).join(", ") || "none"}</div>
         </Card>
       </div>

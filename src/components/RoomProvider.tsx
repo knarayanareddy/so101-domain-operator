@@ -27,7 +27,16 @@ export interface Persisted {
   calLeader: ArmCalibration;
   marks: Mark[];
   palette: PaletteEntry[];
-  detectMode: "color" | "diff";
+  detectMode: "color" | "diff" | "detector";
+  /**
+   * Open-vocabulary prompt for `detectMode: "detector"`, e.g.
+   * "a resistor, a capacitor, a phone screen". Comma-separated: the server runs one
+   * forward pass per label because Florence-2 collapses a multi-label prompt to one
+   * box (measured — see src/lib/detect.ts).
+   */
+  detectorPrompt: string;
+  /** Advisory detector status, shown in the Vision tab. Never gates motion itself. */
+  detector: { ready: boolean; error: string | null; lastMs: number | null; dropped: number; labels: string[] };
   diffThresh: number;
   minArea: number;
   grasp: GraspTuning;
@@ -56,6 +65,8 @@ export function defaultPersisted(): Persisted {
       { label: "yellow cube", rgb: [235, 205, 40], tol: 60 },
     ],
     detectMode: "color",
+  detectorPrompt: "a resistor, a capacitor, a phone screen, a sample tube, a stock crate",
+  detector: { ready: false, error: null, lastMs: null, dropped: 0, labels: [] },
     diffThresh: 60,
     minArea: 200,
     grasp: { ...DEFAULT_GRASP },
@@ -132,6 +143,16 @@ interface Room {
   replay: (name: string, speed: number, loop: boolean) => Promise<void>;
   worldTick: number;
 }
+
+/**
+ * Reach gate for the advisory detector. Mirrors src/playground/scenarios/dsl.ts
+ * (A_BASE with a 24.2 cm envelope, 1.1 cm margin) so the live camera path and the
+ * Sim Lab agree on what "reachable" means. A target outside this is DROPPED, never
+ * clamped — that mismatch is what previously made the arm grasp empty table.
+ */
+const ARM_A_BASE = { x: -12, y: -12 };
+const REACH_CM = 24.2;
+const REACH_MARGIN_CM = 1.1;
 
 const Ctx = createContext<Room | null>(null);
 export const useRoom = () => {
@@ -459,6 +480,42 @@ export function RoomProvider({ children }: { children: ReactNode }) {
     const H = fitAndValidate(d.marks).H;
     if (!H) throw new Error("Camera is not calibrated (Vision tab).");
     let dets: Detection[] = [];
+
+    if (d.detectMode === "detector") {
+      // ADVISORY. The detector proposes boxes; localizeAll() converts to world cm.
+      // Nothing here actuates — the caller still applies the reach check and the
+      // motor stall check before anything moves.
+      const { detectOpenVocabulary, planPicks } = await import("@/lib/detect");
+      const prompt = d.detectorPrompt.trim();
+      if (!prompt) throw new Error("Set a detector prompt (Vision tab).");
+      const r = await detectOpenVocabulary(img, { text: prompt, minArea: d.minArea });
+      if (!r.ok) {
+        update({
+          detector: { ...d.detector, ready: false, error: r.error ?? "detector unavailable" },
+        });
+        // Fail closed: an unavailable detector yields NO detections, never a guess.
+        // Upstream this surfaces as `unknown`, which is what repair.ts expects.
+        return [];
+      }
+      // Reach gate against arm A. Mirrors Sim Lab's A_BASE [-12, 0, -12] and its
+      // 24.2 cm reach with the same 1.1 cm margin, so a target the simulation
+      // rejects is also rejected here rather than turning into a thin-air grasp.
+      const plan = planPicks(r.detections, H, ARM_A_BASE, REACH_CM, REACH_MARGIN_CM);
+      update({
+        detector: {
+          ready: true,
+          error: null,
+          lastMs: r.ms ?? null,
+          dropped: r.dropped_as_implausible ?? 0,
+          labels: r.per_label ? Object.keys(r.per_label) : r.detections.map((x) => x.label),
+        },
+      });
+      for (const rej of plan.rejected) {
+        log(`Rejected "${rej.label}": ${rej.reason}${rej.dFromBaseCm ? ` (${rej.dFromBaseCm} cm from base)` : ""}`, "warn");
+      }
+      return plan.picks;
+    }
+
     if (d.detectMode === "color") {
       for (const p of d.palette) dets.push(...detectByColor(img, p.rgb, p.tol, { label: p.label, minArea: d.minArea }));
     } else {
