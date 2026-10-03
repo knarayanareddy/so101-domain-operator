@@ -18,6 +18,7 @@ const ExplodedView = dynamic(() => import("./ExplodedView"), { ssr: false, loadi
 const BuildGuide = dynamic(() => import("./BuildGuide"), { ssr: false, loading: Loading });
 const Playground = dynamic(() => import("./Playground"), { ssr: false, loading: Loading });
 const ControlPanel = dynamic(() => import("./ControlPanel"), { ssr: false, loading: Loading });
+const VoiceDock = dynamic(() => import("./VoiceDock"), { ssr: false, loading: () => null });
 
 type Sub = "playground" | "panel" | "exploded" | "build" | "overview";
 
@@ -53,6 +54,9 @@ export function LabTab() {
           </button>
         ))}
       </nav>
+      {/* Floating voice dock: mounted once here so it stays put and reachable
+          from every sub-tab, including the 3D playground. */}
+      <VoiceDock />
       <div className="-mx-4 rounded-lg">
         {sub === "playground" && <Playground key={scenario ?? "default"} initial={scenario} />}
         {sub === "panel" && <ControlPanel />}
