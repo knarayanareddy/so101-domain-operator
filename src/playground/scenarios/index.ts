@@ -9,33 +9,49 @@ import { electronicsScenarios } from './electronics';
 const showcase = showcaseScenarios();
 
 /**
- * `lab` (Lab Sample Handler — vortex-mix, load the centrifuge, press START) leads
- * the list because it is the strongest lab story: it has a real process with an
- * interlock, not just a fetch. The showcase's `lab-samples` (custody record) moves
- * down with the rest of the showcase block rather than sitting second.
+ * Default list order — requested 2026-10-04. This array IS the Sim Lab's default
+ * ordering, so the demo sequence is expressed by position alone:
  *
- * Requested 2026-10-04. Ordering here is the Sim Lab's default list order, so
- * "move it up / move the other one down" is expressed by array position alone.
+ *   1. phone-repair      the live-hardware anchor
+ *   2. pcb-assembly      same pipeline, smaller parts, two arms
+ *   3. lab               Lab Sample Handler — vortex-mix, centrifuge, START
+ *   4. screwdriver-bench service teardown
+ *   5. multimeter-bench  test sweep
+ *
+ * Everything else follows in its previous groups. Nothing is dropped: the pinned
+ * ids are partitioned out and re-emitted first, and a test asserts every scenario
+ * still appears exactly once.
  */
-const labLead = helpfulScenarios.filter((s) => s.id === "lab");
-const rest = helpfulScenarios.filter((s) => s.id !== "lab");
+const PINNED = [
+  "phone-repair",
+  "pcb-assembly",
+  "lab",
+  "screwdriver-bench",
+  "multimeter-bench",
+] as const;
 
-export const ALL_SCENARIOS: Scenario[] = [
-  // 1. The lab lead story, on its own so it can be promoted independently.
-  ...labLead,
-  // 2. The five showcase domains.
+const pool: Scenario[] = [
   ...showcase,
-  // 3. Single-pick variants: same scene, but ONE fetch on request and then hold.
   ...showcase.map(withSinglePick),
   ...labScenarios,
-  // Electronics service bench: screwdriver teardown + multimeter sweep. Both are
-  // two-arm and were added after the showcase block so the five-domain story still
-  // reads first.
   ...electronicsScenarios(),
   ...creativeScenarios,
-  ...rest,
+  ...helpfulScenarios,
   ...industryScenarios,
 ];
+
+const pinned = PINNED.map((id) => {
+  const hit = pool.find((s) => s.id === id);
+  if (!hit) throw new Error(`pinned scenario "${id}" is missing from the pool`);
+  return hit;
+});
+const pinnedIds = new Set(PINNED as readonly string[]);
+
+export const ALL_SCENARIOS: Scenario[] = [
+  ...pinned,
+  ...pool.filter((s) => !pinnedIds.has(s.id)),
+];
+
 
 export const CATEGORY_ORDER = ['Learn & Teleop', 'Music & Art', 'Games & Play', 'Care & Assistive', 'Lab & Kitchen', 'Industry & Testing', 'Space & Research'];
 

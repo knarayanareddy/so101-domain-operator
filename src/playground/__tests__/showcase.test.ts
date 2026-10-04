@@ -425,20 +425,28 @@ describe("BOTH arms work simultaneously, not in turns", () => {
 
 
 describe("Sim Lab default ordering", () => {
-  it("Lab Sample Handler is the FIRST scenario in the default list", () => {
-    expect(ALL_SCENARIOS[0].id).toBe("lab");
-    expect(ALL_SCENARIOS[0].title).toBe("Lab Sample Handler");
+  it("the demo sequence is the first five, in the requested order", () => {
+    expect(ALL_SCENARIOS.slice(0, 5).map((s) => s.id)).toEqual([
+      "phone-repair",
+      "pcb-assembly",
+      "lab",
+      "screwdriver-bench",
+      "multimeter-bench",
+    ]);
+    expect(ALL_SCENARIOS[0].title).toBe("Mobile Phone Repair");
+    expect(ALL_SCENARIOS[2].title).toBe("Lab Sample Handler");
   });
 
   it("its tagline names the vortex / centrifuge / START process", () => {
-    const l = ALL_SCENARIOS[0];
+    // looked up by id: `lab` is 3rd now, not 1st
+    const l = ALL_SCENARIOS.find((x) => x.id === "lab")!;
     expect(l.tagline.toLowerCase()).toMatch(/vortex/i);
     expect(l.tagline.toLowerCase()).toMatch(/centrifuge/i);
     expect(l.tagline.toLowerCase()).toMatch(/start/i);
   });
 
   it("it really uses two arms and really moves", () => {
-    const l = ALL_SCENARIOS[0];
+    const l = ALL_SCENARIOS.find((x) => x.id === "lab")!;
     expect(l.arms).toBe(2);
     const ph = (l.program as { phases: Phase[] }).phases;
     expect(ph.length).toBeGreaterThan(6);
@@ -451,6 +459,7 @@ describe("Sim Lab default ordering", () => {
     const iSamples = ALL_SCENARIOS.findIndex((s) => s.id === "lab-samples");
     expect(iSamples).toBeGreaterThan(0);
     expect(iSamples).toBeGreaterThan(ALL_SCENARIOS.findIndex((s) => s.id === "lab"));
+    expect(iSamples).toBeGreaterThanOrEqual(5); // no longer in the demo top five
     // and it still exists exactly once
     expect(ALL_SCENARIOS.filter((s) => s.id === "lab-samples")).toHaveLength(1);
   });

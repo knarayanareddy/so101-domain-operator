@@ -89,7 +89,9 @@ describe("registry integrity", () => {
     const ids2 = ALL_SCENARIOS.map((s) => s.id);
     expect(new Set(ids2).size).toBe(ids2.length);
   });
-  it("Lab Sample Handler still leads", () => {
-    expect(ALL_SCENARIOS[0].id).toBe("lab");
+  it("the electronics pair sits 4th and 5th, after the three anchor scenarios", () => {
+    const ids2 = ALL_SCENARIOS.slice(0, 5).map((x) => x.id);
+    expect(ids2.indexOf("screwdriver-bench")).toBe(3);
+    expect(ids2.indexOf("multimeter-bench")).toBe(4);
   });
 });
