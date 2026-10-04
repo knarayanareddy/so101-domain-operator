@@ -1,5 +1,5 @@
 import type { Scenario, Phase, PropSpec, FixtureSpec } from '../sim/types';
-import { P, wait, pickPlace, fbox, fcyl, A_BASE, B_BASE } from './dsl';
+import { P, par, wait, pickPlace, fbox, fcyl, A_BASE, B_BASE } from './dsl';
 import {
   phoneBattery, phoneScreen, logicBoard, componentReel, sampleTube,
   drinkCup, magazine, stockCrate, phoneUnderRepair, at,
@@ -153,21 +153,27 @@ function phoneRepair(): Scenario {
     ),
   );
 
-  const phases: Phase[] = [
-    wait(0.7, '📋 Work order open: screen replacement · parts spread across BOTH arms\' reach'),
-  ];
-  PARTS.forEach((p, i) => {
-    phases.push(
-      ...pickPlace(p.spot.arm, [p.spot.at[0], p.spot.at[1]], [mx, mz], {
-        speed: 0.85, fh: 1.4, th: 2.0, safe: 7,
-        say:
-          i === 0
-            ? `🗣️ "Next: battery." → arm ${p.spot.arm.toUpperCase()} fetches from across the bench`
-            : `step ${i + 1}/3 · ${p.label} · arm ${p.spot.arm.toUpperCase()}`,
-      }),
-    );
-    phases.push(wait(0.35, `   ✓ stall-verified grasp · ledger step ${i + 1} recorded`));
-  });
+  /**
+   * PARALLEL, not sequential. par() merges two phase lists so a phase carrying both
+   * `a` and `b` moves BOTH arms in the same frame — the engine already supported
+   * it; the previous script simply never asked for it, so the arms took turns.
+   */
+  const fetch = (p: (typeof PARTS)[number], i: number): Phase[] =>
+    pickPlace(p.spot.arm, [p.spot.at[0], p.spot.at[1]], [mx, mz], {
+      speed: 0.85, fh: 1.4, th: 2.0, safe: 7,
+      say:
+        i === 0
+          ? `🗣️ "Fit the screen and the battery." → BOTH arms fetch at once`
+          : undefined,
+    });
+
+  const phases: Phase[] = [wait(0.7, '📋 Work order open: screen replacement · parts spread across BOTH arms\' reach')];
+  // arms A and B work simultaneously on their own parts
+  phases.push(...par(fetch(PARTS[1], 1), fetch(PARTS[0], 0)));
+  phases.push(wait(0.4, '   ✓ both grasps stall-verified · ledger steps 1–2 recorded'));
+  // the remaining part is on arm B's side
+  phases.push(...fetch(PARTS[2], 2));
+  phases.push(wait(0.35, '   ✓ stall-verified grasp · ledger step 3 recorded'));
   phases.push(wait(0.8, '📄 Ledger: 3/3 steps verified · 0 fail · 0 unknown'));
 
   return {
@@ -249,19 +255,21 @@ function pcbAssembly(): Scenario {
     fixtures.push(fbox(r.at[0] - 3.4, 1.1, r.at[1] - 2.6, 2.6, 2.2, 0.2, 0xf1f3f5, { label: r.label })),
   );
 
+  /** One reel placed per call; par() below runs two of these in the same frame. */
+  const fetch = (r: (typeof REELS)[number], i: number, say?: string): Phase[] =>
+    pickPlace(r.arm, [r.at[0], r.at[1]], [BOARD.at[0] - 1.4 + i * 1.4, BOARD.at[1]], {
+      speed: 0.7, fh: 1.2, th: 1.6, safe: 7, say,
+    });
+
   const phases: Phase[] = [wait(0.7, '📐 Assembly order loaded · both arms kitting in parallel')];
-  REELS.forEach((r, i) => {
-    phases.push(
-      ...pickPlace(r.arm, [r.at[0], r.at[1]], [BOARD.at[0] - 1.4 + i * 1.4, BOARD.at[1]], {
-        speed: 0.7, fh: 1.2, th: 1.6, safe: 7,
-        say:
-          i === 0
-            ? `🗣️ "Pass the resistor pack." → arm ${r.arm.toUpperCase()} takes it, the other steadies the board`
-            : `place ${r.label} at footprint ${i + 1} · arm ${r.arm.toUpperCase()}`,
-      }),
-    );
-    phases.push(wait(0.3, `   ✓ placed · ledger step ${i + 1}/3`));
-  });
+  // arm A takes the resistors while arm B takes the capacitors, at the same time
+  phases.push(
+    ...par(fetch(REELS[0], 0, '🗣️ "Pass the resistor pack." → both arms place at once'),
+          fetch(REELS[1], 1)),
+  );
+  phases.push(wait(0.3, '   ✓ both placed · ledger steps 1–2'));
+  phases.push(...fetch(REELS[2], 2));
+  phases.push(wait(0.3, '   ✓ placed · ledger step 3/3'));
   phases.push(
     P(HOLDER.arm, 1.2, { p: [HOLDER.at[0], 2.6, HOLDER.at[1]], pitch: -70, grip: 1 },
       `   🤝 arm ${HOLDER.arm.toUpperCase()} holds the board until the step is signed off`),
@@ -310,40 +318,65 @@ for i, (reel, footprint) in enumerate(order):
  * 3. LABORATORY SAMPLE HANDLING — becomes an audit trail
  * ===================================================================== */
 function labSamples(): Scenario {
-  const ARM = 'a' as const;
-  // Tubes spread ~32 cm apart: a rack of three touching tubes reads as one mass.
-  const SPOT = { a1: [-3, -29], a2: [-32, -14], a3: [-5, 3] } as const;
-  const ANALYSER: [number, number] = [-20, -6];
-
+  const A = 'a' as const;
+  const B = 'b' as const;
+  /**
+   * TWO arms (added 2026-10-04 — this scenario was still single-arm while
+   * phone-repair and pcb-assembly had moved to two, which was reported wrongly).
+   * Tubes spread across the union of both envelopes; arm A takes two, arm B takes
+   * one and loads the analyser, and the first pair is fetched in PARALLEL.
+   */
   const SAMPLES = [
-    { id: 'smp-a1', label: 'A1', color: 0xe05252, spot: SPOT.a1 },
-    { id: 'smp-a2', label: 'A2', color: 0x5f8fd9, spot: SPOT.a2 },
-    { id: 'smp-a3', label: 'A3', color: 0x69b87a, spot: SPOT.a3 },
+    { id: 'smp-a1', label: 'A1', color: 0xe05252, at: [-3, -29] as const, arm: A },
+    { id: 'smp-a2', label: 'A2', color: 0x5f8fd9, at: [-32, -14] as const, arm: A },
+    { id: 'smp-a3', label: 'A3', color: 0x69b87a, at: [24, -27] as const, arm: B },
   ];
-  SAMPLES.forEach((s) => assertReachable(ARM, [[s.id, s.spot[0], s.spot[1]]], 'lab src'));
-  SAMPLES.forEach((s) => assertReachable(ARM, [[s.id, ANALYSER[0], ANALYSER[1]]], 'lab dst'));
+  // Placed in the OVERLAP of both envelopes (0,0): each arm loads it, so it must be
+  // within reach of both. An earlier (19, 8) was outside arm A and assertReachable
+  // threw at import — the guard doing its job.
+  const ANALYSER: [number, number] = [0, 0];
+  const LOADER: [number, number] = [-32, -4];
+  assertReachable(A, [['loader', LOADER[0], LOADER[1]]], 'lab loader');
+  assertReachable(B, [['analyser', ANALYSER[0], ANALYSER[1]]], 'lab analyser');
+  SAMPLES.forEach((s) => assertReachable(s.arm, [[s.id, s.at[0], s.at[1]]], 'lab src'));
+  SAMPLES.forEach((s) => assertReachable(A, [[s.id, ANALYSER[0], ANALYSER[1]]], 'lab dst'));
 
-  // Real cryovials: capped tube, coloured contents, label band.
   const props: PropSpec[] = SAMPLES.map((s) => {
     const tube = sampleTube(s.color);
-    return { id: s.id, ...at(tube.prim, s.spot[0], 0, s.spot[1]), label: `sample ${s.label}`, grab: true, width: tube.grabWidth } as PropSpec;
+    return {
+      id: s.id,
+      ...at(tube.prim, s.at[0], 0, s.at[1]),
+      label: `sample ${s.label}`,
+      grab: true,
+      width: tube.grabWidth,
+    } as PropSpec;
   });
 
-  const fixtures: FixtureSpec[] = [fbox(ANALYSER[0], 1.1, ANALYSER[1], 5, 2.2, 6, 0x2b3038, { label: 'analyser' })];
+  const fixtures: FixtureSpec[] = [
+    fbox(ANALYSER[0], 1.1, ANALYSER[1], 5, 2.2, 6, 0x2b3038, { label: 'analyser' }),
+    fbox(LOADER[0], 0.9, LOADER[1], 5, 1.8, 4.5, 0x24485c, { label: 'sample loader' }),
+  ];
   SAMPLES.forEach((s) =>
-    fixtures.push(fbox(s.spot[0] + 2.2, 1.2, s.spot[1], 1.6, 2.4, 0.2, 0xf4f6f8, { label: s.label })),
+    fixtures.push(fbox(s.at[0] + 2.2, 1.2, s.at[1], 1.6, 2.4, 0.2, 0xf4f6f8, { label: s.label })),
   );
 
-  const phases: Phase[] = [wait(0.7, '🧪 Manifest loaded: A1, A2, A3 → analyser')];
-  SAMPLES.forEach((s, i) => {
-    phases.push(
-      ...pickPlace(ARM, [s.spot[0], s.spot[1]], [ANALYSER[0] + 1.6, ANALYSER[1] - 1.6 + i * 1.6], {
-        speed: 0.7, fh: 1.6, th: 2.6, safe: 7,
-        say: i === 0 ? '🗣️ "Rack position one." → position, not appearance, is checked' : `sample ${s.label} → analyser`,
-      }),
-    );
-    phases.push(wait(0.3, `   ✓ position vacated · timestamped`));
-  });
+  const fetch = (s: (typeof SAMPLES)[number], dest: [number, number], say?: string): Phase[] =>
+    pickPlace(s.arm, [s.at[0], s.at[1]], dest, {
+      speed: 0.7, fh: 1.6, th: 2.6, safe: 7, say,
+    });
+
+  const phases: Phase[] = [
+    wait(0.7, '🧪 Manifest loaded: A1, A2, A3 → two arms, one manifest'),
+  ];
+  // arm A walks A1 and A2 to the loader while arm B walks A3 to the analyser,
+  // simultaneously — the custody log records who moved what.
+  phases.push(
+    ...par(fetch(SAMPLES[0], [LOADER[0] - 1.4, LOADER[1]], '🗣️ "Rack positions one and two." → arm A racks, arm B loads'),
+          fetch(SAMPLES[2], [ANALYSER[0], ANALYSER[1] - 1.8])),
+  );
+  phases.push(wait(0.4, '   ✓ positions vacated · two entries timestamped at once'));
+  phases.push(...fetch(SAMPLES[1], [LOADER[0] + 1.4, LOADER[1]]));
+  phases.push(wait(0.3, '   ✓ position vacated · timestamped'));
   phases.push(wait(0.8, '🔒 Chain of custody: every movement recorded with a time'));
 
   return {
@@ -351,33 +384,33 @@ function labSamples(): Scenario {
     title: 'Lab Sample Handling',
     emoji: '🧪',
     category: 'Lab & Kitchen',
-    tagline: 'Manifest-driven fetching that doubles as a custody record',
+    tagline: 'Two arms, manifest-driven, doubles as a custody record',
     story:
-      'A lab technician walks three numbered sample tubes, spaced well apart on the bench, to an analyser. The manifest states the order. What matters is not what a tube looks like but that the arm took the right one — so the record is a chain-of-custody log, timestamped, one entry per movement.',
+      'A lab technician walks three numbered sample tubes, spaced well apart across the bench, into an analyser and a rack. Two arms work the manifest at once: one racks tubes while the other loads the analyser. What matters is not what a tube looks like but that the arm took the right one — so the record is a chain-of-custody log, timestamped, one entry per movement.',
     novelty:
       'The same pipeline that moved parts now produces traceability. The deliverable is the audit trail, which is what a regulated lab actually buys.',
-    difficulty: 1,
-    arms: 1,
-    hardware: ['Three capped sample tubes (3D cryovials), laid out apart', 'Analyser station', 'Overhead camera or fixed marks', 'Optional distance sensor'],
+    difficulty: 2,
+    arms: 2,
+    hardware: ['Three capped sample tubes (3D cryovials), laid out apart', 'Analyser station and sample loader', 'Overhead camera or fixed marks', 'Optional distance sensor per position'],
     approach:
-      'Position-first verification: the manifest is ground truth and the ledger is the custody record.',
+      'Position-first verification: the manifest is ground truth, both arms are driven in parallel, and the ledger is the custody record.',
     howTo: [
       'Place each tube on its own taped mark, far apart, so each is individually visible.',
       'Load the manifest: an ordered list of sample IDs.',
       'Optionally put a distance sensor near each position to confirm it was vacated.',
-      'Run: each movement is fetched, verified and timestamped.',
+      'Run: both arms work the manifest simultaneously and each movement is timestamped.',
     ],
-    code: `for slot in manifest.order:
-    if distance.slot_occupied(slot):
-        continue
-    tube = rack.pick(slot)
-    assert tube.slot == slot                     # wrong slot -> abort
-    analyser.place(tube)
-    custody.append(t_ms=now(), event="moved", slot=slot, sample=tube.id)`,
+    code: `# Two arms, one manifest. par() merges the phase lists so both arms move
+# in the same frame; the custody log stays sequential.
+for batch in manifest.batches(2):
+    par(*[arm_for(slot).pick(rack[slot]) and arm_for(slot).place(slot) for slot in batch])
+    for slot in batch:
+        assert distance.slot_occupied(slot) is False
+        custody.append(t_ms=now(), event="moved", slot=slot, sample=slot.sample)`,
     theme: 'lab',
     props,
     fixtures,
-    cam: frame([[-3, -29], [-32, -14], [-5, 3], ANALYSER]),
+    cam: frame([[-3, -29], [-32, -14], [24, -27], ANALYSER, LOADER, [-12, -12], [12, -12]]),
     program: { kind: 'phases', phases, loop: true },
   };
 }

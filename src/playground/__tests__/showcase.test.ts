@@ -368,3 +368,56 @@ describe("two-arm spread: materials exceed a single arm's envelope", () => {
     }
   });
 });
+
+
+describe("BOTH arms work simultaneously, not in turns", () => {
+  const parallelDomains = ["phone-repair", "pcb-assembly", "lab-samples"];
+
+  it("all three spread domains are two-arm", () => {
+    for (const id of parallelDomains) {
+      expect(showcaseById(id)!.arms, `${id} should use both arms`).toBe(2);
+    }
+  });
+
+  it("each two-arm domain contains at least one phase that drives BOTH arms", () => {
+    for (const id of parallelDomains) {
+      const sc = showcaseById(id)!;
+      expect(sc.program.kind).toBe("phases");
+      const both = (sc.program as { phases: Phase[] }).phases.filter((p) => p.a && p.b);
+      expect(both.length, `${id}: no phase moves both arms at once`).toBeGreaterThan(0);
+    }
+  });
+
+  it("the simultaneous phases have real motion on BOTH sides, not a duplicated arm", () => {
+    for (const id of parallelDomains) {
+      const sc = showcaseById(id)!;
+      const both = (sc.program as { phases: Phase[] }).phases.filter((p) => p.a && p.b);
+      // each side must actually command a position somewhere in the merged block
+      const movesA = both.some((p) => (p.a?.p ? p.a.p.length === 3 : false));
+      const movesB = both.some((p) => (p.b?.p ? p.b.p.length === 3 : false));
+      expect(movesA && movesB, `${id}: one side never commands a position`).toBe(true);
+      // and the two sides must target DIFFERENT places, or it is not two arms working
+      const distinct = both.some((p) => {
+        if (!p.a?.p || !p.b?.p) return false;
+        return Math.hypot(p.a.p[0] - p.b.p[0], p.a.p[2] - p.b.p[2]) > 3;
+      });
+      expect(distinct, `${id}: both sides point at the same spot`).toBe(true);
+    }
+  });
+
+  it("every part is still reachable by its assigned arm after the rework", () => {
+    const A: [number, number] = [A_BASE[0], A_BASE[2]];
+    const B: [number, number] = [B_BASE[0], B_BASE[2]];
+    for (const id of parallelDomains) {
+      for (const p of showcaseById(id)!.props ?? []) {
+        if (!p.grab) continue;
+        const pt: [number, number] = [p.pos[0], p.pos[2]];
+        const near = Math.min(
+          Math.hypot(pt[0] - A[0], pt[1] - A[1]),
+          Math.hypot(pt[0] - B[0], pt[1] - B[1]),
+        );
+        expect(near <= 23.1, `${id}/${p.id} unreachable (${near.toFixed(1)} cm)`).toBe(true);
+      }
+    }
+  });
+});

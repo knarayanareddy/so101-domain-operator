@@ -199,12 +199,28 @@ describe("two-arm routing", () => {
   });
 
   it("a single-arm domain never routes to B", () => {
-    const s = showcaseById("lab-samples")!;
-    for (const p of s.props ?? []) {
-      if (!p.grab) continue;
-      const arm = chooseArm(p.pos[0], p.pos[2], s.arms === 2);
-      expect(arm, `${p.id} unroutable`).toBe("a");
+    // restock-kiosk and phone-tap are still one-arm; lab-samples went two-arm on
+    // 2026-10-04, so it is exercised by the two-arm routing tests instead.
+    for (const id of ["restock-kiosk"]) {
+      const s = showcaseById(id)!;
+      expect(s.arms, `${id} should still be one arm`).toBe(1);
+      for (const p of s.props ?? []) {
+        if (!p.grab) continue;
+        expect(chooseArm(p.pos[0], p.pos[2], s.arms === 2), `${id}/${p.id}`).toBe("a");
+      }
     }
+  });
+
+  it("lab-samples now routes across both arms", () => {
+    const s = showcaseById("lab-samples")!;
+    expect(s.arms).toBe(2);
+    const arms = new Set(
+      (s.props ?? [])
+        .filter((p) => p.grab)
+        .map((p) => chooseArm(p.pos[0], p.pos[2], true)),
+    );
+    // at least one part is served by B, proving both arms are genuinely used
+    expect([...arms].sort()).toEqual(["a", "b"]);
   });
 
   it("drives arm B when the target is on B's side", () => {
