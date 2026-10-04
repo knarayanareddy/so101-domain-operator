@@ -194,11 +194,48 @@ export class Arm {
       JOINTS.map((j) => ({ id: MOTOR_IDS[j], data: [on ? 1 : 0] })),
     );
     this.torque = on;
+
+    /**
+     * READ BACK the torque flag on real hardware.
+     *
+     * Measured 2026-10-04: `torque` was set optimistically and the headless tool
+     * logged "torque released", but the arm stayed rigid and unmovable. The write
+     * had not taken effect (or was dropped on teardown), so a message claiming
+     * release was a lie told to the operator holding a 12 V arm.
+     *
+     * Now we confirm each servo. A mismatch is reported, not swallowed: the caller
+     * can tell the user their arm is still under power.
+     */
+    // Only verify on a real bus. SimServoTransport exposes register reads as plain
+    // properties, not methods, so feature-detect rather than assume.
+    const canRead = typeof (this.bus as { read8?: unknown }).read8 === "function";
+    if (canRead) {
+      const stuck: string[] = [];
+      for (const j of JOINTS) {
+        try {
+          const have = await this.bus.read8(MOTOR_IDS[j], REG.TORQUE_ENABLE);
+          if ((have === 1) !== on) stuck.push(`${j}=${have}`);
+        } catch {
+          /* a read failure must not mask the write; report nothing we cannot prove */
+        }
+      }
+      if (stuck.length) {
+        throw new BusError(
+          `torque ${on ? "ON" : "OFF"} did not confirm on: ${stuck.join(", ")}. ` +
+            `The arm may still be under power — unplug the USB before handling it.`,
+        );
+      }
+    }
   }
 
   /** Emergency stop: torque off on every motor (broadcast, twice). */
   async estop(): Promise<void> {
     this.torque = false;
+    /**
+     * Never throw from estop. Disarming must always complete even if the bus is
+     * already gone — a throw here would strand the arm under power, which is the
+     * one outcome worse than a logged warning.
+     */
     for (let k = 0; k < 2; k++) {
       try {
         await this.bus.syncWrite(

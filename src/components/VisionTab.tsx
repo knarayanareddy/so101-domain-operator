@@ -160,6 +160,23 @@ export function VisionTab() {
             <div className="flex items-center gap-2">
               <Btn small kind={cameraMode === "sim" ? "primary" : "ghost"} onClick={() => setCameraMode("sim")}>Virtual camera</Btn>
               <Btn small kind={cameraMode === "webcam" ? "primary" : "ghost"} onClick={() => setCameraMode("webcam")}>USB webcam</Btn>
+              {/* Camera picker. Added 2026-10-04: getUserMedia took no deviceId, so
+                  macOS always opened the built-in FaceTime camera even with a UVC
+                  webcam repositioned over the bench. */}
+              {cameraMode === "webcam" && data.cameras.length > 1 && (
+                <select
+                  value={data.cameraId}
+                  onChange={(e) => update({ cameraId: e.target.value })}
+                  title="Which physical camera to open"
+                  className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+                >
+                  {data.cameras.map((c) => (
+                    <option key={c.deviceId} value={c.deviceId}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           }
         >

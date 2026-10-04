@@ -47,7 +47,7 @@ cd "$PROJ"
 
 # Move the server-only routes aside.
 STASH="$(mktemp -d)"
-for r in voice speak state health; do
+for r in voice speak state health detect; do
   if [ -d "src/app/api/$r" ]; then
     mkdir -p "$STASH/$r"
     mv "src/app/api/$r"/* "$STASH/$r"/ 2>/dev/null || true

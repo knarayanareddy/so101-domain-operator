@@ -79,8 +79,41 @@ async function emergencyStop(reason: string): Promise<void> {
   }));
 }
 
-process.on("SIGINT", () => void emergencyStop("SIGINT (Ctrl-C)").then(() => process.exit(130)));
-process.on("SIGTERM", () => void emergencyStop("SIGTERM").then(() => process.exit(143)));
+/**
+ * Close every open serial port before the process leaves.
+ *
+ * MEASURED 2026-10-04: Ctrl-C on a command called process.exit() straight after the
+ * e-stop, without closing the SerialPort. macOS then kept the device locked and
+ * every later open failed with "Resource busy, cannot open /dev/cu.usbmodem..." —
+ * no process lsof could find. It cost several unplug/replug cycles to clear.
+ *
+ * Both handlers now disarm, close, then exit. Ports are tracked in PORTS_OPEN so
+ * this works no matter which command was running.
+ */
+const PORTS_OPEN = new Set<{ close(): void }>();
+
+function closeAllPorts(): void {
+  for (const p of PORTS_OPEN) {
+    try {
+      p.close();
+    } catch {
+      /* already gone */
+    }
+  }
+  PORTS_OPEN.clear();
+}
+
+async function shutdown(code: number, why: string): Promise<never> {
+  await emergencyStop(why).catch(() => undefined);
+  closeAllPorts();
+  // let the driver settle before the process disappears
+  await new Promise((r) => setTimeout(r, 150));
+  process.exit(code);
+}
+
+process.on("SIGINT", () => void shutdown(130, "SIGINT (Ctrl-C)"));
+process.on("SIGTERM", () => void shutdown(143, "SIGTERM"));
+process.on("exit", closeAllPorts);
 const realExit = process.exit.bind(process) as (code?: number) => never;
 process.exit = ((code?: number) => {
   void emergencyStop(`process.exit(${code ?? 0})`).then(() => realExit(code));
@@ -108,9 +141,12 @@ async function assertPower(arm: Arm, name: string, fatal = true): Promise<void> 
 }
 
 async function openArm(name: string, path: string | undefined): Promise<Arm> {
+  // tracked so shutdown() can always release the device
   let transport: any;
   if (path) {
     transport = await NodeSerialTransport.open(path, 1_000_000);
+    // tracked so shutdown() can always release the device (see PORTS_OPEN)
+    PORTS_OPEN.add(transport);
     say(`arm ${name}: opened ${path} @ 1 Mbps`);
   } else {
     transport = new SimServoTransport(JOINTS.map((j) => ({ id: MOTOR_IDS[j], pos: 2048 })));

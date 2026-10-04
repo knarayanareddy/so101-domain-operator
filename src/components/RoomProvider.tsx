@@ -29,6 +29,16 @@ export interface Persisted {
   palette: PaletteEntry[];
   detectMode: "color" | "diff" | "detector";
   /**
+   * Which physical camera to open, as a MediaDeviceInfo.deviceId.
+   *
+   * BUG FIXED 2026-10-04: getUserMedia was called with no deviceId, so macOS handed
+   * back the default camera — the built-in FaceTime one — even when the operator had
+   * repositioned a UVC webcam over the bench. Vision missions then looked at the
+   * operator's face. Enumerating devices and letting the operator choose is the fix.
+   */
+  cameraId: string;
+  cameras: { deviceId: string; label: string }[];
+  /**
    * Open-vocabulary prompt for `detectMode: "detector"`, e.g.
    * "a resistor, a capacitor, a phone screen". Comma-separated: the server runs one
    * forward pass per label because Florence-2 collapses a multi-label prompt to one
@@ -65,6 +75,8 @@ export function defaultPersisted(): Persisted {
       { label: "yellow cube", rgb: [235, 205, 40], tol: 60 },
     ],
     detectMode: "color",
+  cameraId: "",
+  cameras: [],
   detectorPrompt: "a resistor, a capacitor, a phone screen, a sample tube, a stock crate",
   detector: { ready: false, error: null, lastMs: null, dropped: 0, labels: [] },
     diffThresh: 60,
@@ -400,8 +412,42 @@ export function RoomProvider({ children }: { children: ReactNode }) {
       streamRef.current = null;
       if (m === "webcam") {
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+          // Prefer the operator's chosen camera; fall back to the default only when
+          // none has been picked yet.
+          const want = dataRef.current.cameraId;
+          const constraints: MediaStreamConstraints = {
+            video: want ? { deviceId: { exact: want }, width: 1280, height: 720 } : { width: 1280, height: 720 },
+          };
+          let stream: MediaStream;
+          try {
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+          } catch (e) {
+            // A stale deviceId (unplugged webcam) must not leave the camera dead.
+            stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+            const why = e instanceof Error ? e.message : String(e);
+            setLogs((l) => [
+              ...l.slice(-199),
+              { t: Date.now(), level: "warn", msg: `Selected camera unavailable (${why}); using the default.` },
+            ]);
+          }
           streamRef.current = stream;
+          // Populate the picker. Labels are only exposed after permission is granted.
+          try {
+            const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+            const list = devs.map((d, i) => ({
+              deviceId: d.deviceId,
+              label: d.label || `Camera ${i + 1}`,
+            }));
+            if (list.length) {
+              const active = stream.getVideoTracks()[0]?.getSettings?.().deviceId;
+              update({
+                cameras: list,
+                cameraId: list.some((c) => c.deviceId === active) ? active : list[0].deviceId,
+              });
+            }
+          } catch {
+            /* enumeration is best-effort */
+          }
           if (video.current) {
             video.current.srcObject = stream;
             await video.current.play();

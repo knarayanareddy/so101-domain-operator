@@ -65,9 +65,41 @@ export class NodeSerialTransport implements Transport {
   static async open(path: string, baudRate = 1_000_000): Promise<NodeSerialTransport> {
     const { SerialPort } = await import("serialport");
     const port = new SerialPort({ path, baudRate, autoOpen: false });
-    await new Promise<void>((resolve, reject) =>
-      port.open((err: Error | null) => (err ? reject(err) : resolve())),
-    );
+
+    /**
+     * Retry a locked port instead of failing.
+     *
+     * MEASURED 2026-10-04: an interrupted command left the device locked and every
+     * later open returned "Resource busy, cannot open ..." with nothing in lsof. The
+     * only cure was a physical unplug/replug, which is not something a demo can rely
+     * on. macOS often frees the tty on its own within a second or two; when it does,
+     * this recovers silently. When it does not, the error still names the real cause
+     * and the fix.
+     */
+    const isBusy = (m: string) => /resource busy|device or resource busy/i.test(m);
+    let lastErr = "";
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      try {
+        await new Promise<void>((resolve, reject) =>
+          port.open((err: Error | null) => (err ? reject(err) : resolve())),
+        );
+        if (attempt > 1) {
+          process.stderr.write(`[transport] port free after ${attempt} attempts\n`);
+        }
+        break;
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : String(e);
+        if (!isBusy(lastErr) || attempt === 6) {
+          throw new Error(
+            isBusy(lastErr)
+              ? `${lastErr}\n  The tty is still locked after 6 attempts (~6s). ` +
+                `Unplug and replug the USB cable once — macOS is holding the device.`
+              : lastErr,
+          );
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
     const t = new NodeSerialTransport(port);
     port.on("data", (chunk: Buffer) => {
       for (let i = 0; i < chunk.length; i++) t.rx.push(chunk[i]);
