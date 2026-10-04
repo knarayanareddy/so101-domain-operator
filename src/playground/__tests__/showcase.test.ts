@@ -7,6 +7,7 @@ import {
   showcaseItems,
   SHOWCASE_SCRIPT,
 } from "../scenarios/showcase";
+import type { Phase } from "../sim/types";
 
 const REACH = 24.2;
 const MARGIN = 1.1;
@@ -419,5 +420,47 @@ describe("BOTH arms work simultaneously, not in turns", () => {
         expect(near <= 23.1, `${id}/${p.id} unreachable (${near.toFixed(1)} cm)`).toBe(true);
       }
     }
+  });
+});
+
+
+describe("Sim Lab default ordering", () => {
+  it("Lab Sample Handler is the FIRST scenario in the default list", () => {
+    expect(ALL_SCENARIOS[0].id).toBe("lab");
+    expect(ALL_SCENARIOS[0].title).toBe("Lab Sample Handler");
+  });
+
+  it("its tagline names the vortex / centrifuge / START process", () => {
+    const l = ALL_SCENARIOS[0];
+    expect(l.tagline.toLowerCase()).toMatch(/vortex/i);
+    expect(l.tagline.toLowerCase()).toMatch(/centrifuge/i);
+    expect(l.tagline.toLowerCase()).toMatch(/start/i);
+  });
+
+  it("it really uses two arms and really moves", () => {
+    const l = ALL_SCENARIOS[0];
+    expect(l.arms).toBe(2);
+    const ph = (l.program as { phases: Phase[] }).phases;
+    expect(ph.length).toBeGreaterThan(6);
+    // both arms are commanded somewhere in the script
+    expect(ph.some((p) => p.a)).toBe(true);
+    expect(ph.some((p) => p.b)).toBe(true);
+  });
+
+  it("the custody-record lab-samples moved DOWN, behind the lead", () => {
+    const iSamples = ALL_SCENARIOS.findIndex((s) => s.id === "lab-samples");
+    expect(iSamples).toBeGreaterThan(0);
+    expect(iSamples).toBeGreaterThan(ALL_SCENARIOS.findIndex((s) => s.id === "lab"));
+    // and it still exists exactly once
+    expect(ALL_SCENARIOS.filter((s) => s.id === "lab-samples")).toHaveLength(1);
+  });
+
+  it("promoting lab did not drop or duplicate any scenario", () => {
+    const ids = ALL_SCENARIOS.map((s) => s.id);
+    expect(new Set(ids).size, "duplicate scenario ids").toBe(ids.length);
+    // helpful.ts still contributes all of its scenarios
+    expect(ids.filter((i) => ["lab", "plant", "bar", "burger"].includes(i)).sort()).toEqual(
+      ["bar", "burger", "lab", "plant"],
+    );
   });
 });

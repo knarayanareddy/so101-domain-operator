@@ -7,13 +7,28 @@ import { withSinglePick } from './single-pick';
 
 const showcase = showcaseScenarios();
 
+/**
+ * `lab` (Lab Sample Handler — vortex-mix, load the centrifuge, press START) leads
+ * the list because it is the strongest lab story: it has a real process with an
+ * interlock, not just a fetch. The showcase's `lab-samples` (custody record) moves
+ * down with the rest of the showcase block rather than sitting second.
+ *
+ * Requested 2026-10-04. Ordering here is the Sim Lab's default list order, so
+ * "move it up / move the other one down" is expressed by array position alone.
+ */
+const labLead = helpfulScenarios.filter((s) => s.id === "lab");
+const rest = helpfulScenarios.filter((s) => s.id !== "lab");
+
 export const ALL_SCENARIOS: Scenario[] = [
+  // 1. The lab lead story, on its own so it can be promoted independently.
+  ...labLead,
+  // 2. The five showcase domains.
   ...showcase,
-  // Single-pick variants: same scene, but ONE fetch on request and then hold.
+  // 3. Single-pick variants: same scene, but ONE fetch on request and then hold.
   ...showcase.map(withSinglePick),
   ...labScenarios,
   ...creativeScenarios,
-  ...helpfulScenarios,
+  ...rest,
   ...industryScenarios,
 ];
 
