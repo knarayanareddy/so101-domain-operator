@@ -4,6 +4,7 @@ import { helpfulScenarios } from './helpful';
 import { industryScenarios, labScenarios } from './industry';
 import { showcaseScenarios } from './showcase';
 import { withSinglePick } from './single-pick';
+import { electronicsScenarios } from './electronics';
 
 const showcase = showcaseScenarios();
 
@@ -27,6 +28,10 @@ export const ALL_SCENARIOS: Scenario[] = [
   // 3. Single-pick variants: same scene, but ONE fetch on request and then hold.
   ...showcase.map(withSinglePick),
   ...labScenarios,
+  // Electronics service bench: screwdriver teardown + multimeter sweep. Both are
+  // two-arm and were added after the showcase block so the five-domain story still
+  // reads first.
+  ...electronicsScenarios(),
   ...creativeScenarios,
   ...rest,
   ...industryScenarios,

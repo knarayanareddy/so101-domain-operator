@@ -150,3 +150,25 @@ export function bin(x: number, z: number, w: number, d: number, h: number, color
     fbox(x + w / 2 - t / 2, h / 2, z, t, h, d, color),
   ];
 }
+
+
+/**
+ * Frame the camera on a set of ground points.
+ *
+ * Lives here rather than in one scenario file because several scenario families
+ * (showcase + electronics) need identical framing behaviour, and two copies would
+ * drift. Pass the ARM BASES in as well as the props when the scene is two-arm —
+ * the arms stand ~35 cm tall and otherwise crop the frame.
+ */
+export function frame(points: [number, number][]): { pos: [number, number, number]; target: [number, number, number] } {
+  const xs = points.map((p) => p[0]);
+  const zs = points.map((p) => p[1]);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs));
+  const dist = span * 1.35 + 52;
+  return {
+    pos: [cx * 0.35, Math.max(38, dist * 0.82), cz * 0.35 + dist * 0.52],
+    target: [cx * 0.5, 0, cz * 0.5],
+  };
+}

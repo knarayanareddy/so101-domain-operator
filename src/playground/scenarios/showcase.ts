@@ -1,5 +1,5 @@
 import type { Scenario, Phase, PropSpec, FixtureSpec } from '../sim/types';
-import { P, par, wait, pickPlace, fbox, fcyl, A_BASE, B_BASE } from './dsl';
+import { P, par, wait, pickPlace, frame, fbox, fcyl, A_BASE, B_BASE } from './dsl';
 import {
   phoneBattery, phoneScreen, logicBoard, componentReel, sampleTube,
   drinkCup, magazine, stockCrate, phoneUnderRepair, at,
@@ -60,32 +60,6 @@ function bench(arm: 'a' | 'b', fwd: number, side = 0): [number, number] {
  * distance from the actual bounds means a layout change cannot silently break the
  * shot again.
  */
-function frame(points: [number, number][]): { pos: [number, number, number]; target: [number, number, number] } {
-  const xs = points.map((p) => p[0]);
-  const zs = points.map((p) => p[1]);
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const cz = (Math.min(...zs) + Math.max(...zs)) / 2;
-  const spanX = Math.max(...xs) - Math.min(...xs);
-  const spanZ = Math.max(...zs) - Math.min(...zs);
-  const span = Math.max(spanX, spanZ);
-  /**
-   * Pull back far enough for BOTH the work area AND the arm rigs.
-   *
-   * The three two-arm domains now spread materials across the union of both reach
-   * envelopes — phone-repair spans 60 cm in x, assistive ~45 cm. The previous
-   * `span * 1.6` was tuned when a single arm served everything and the layouts were
-   * ~30 cm, so the camera cropped the outermost parts and put the arms at the frame
-   * edge. Distance now scales with the true diagonal and keeps a floor.
-   *
-   * Both bases are included in the caller's point list, so `span` already accounts
-   * for the arms; the extra term clears their ~35 cm height.
-   */
-  const dist = span * 1.35 + 52;
-  return {
-    pos: [cx * 0.35, Math.max(38, dist * 0.82), cz * 0.35 + dist * 0.52],
-    target: [cx * 0.5, 0, cz * 0.5],
-  };
-}
 
 /** Fail loudly at import time rather than shipping a scene that grabs air. */
 function assertReachable(arm: 'a' | 'b', pts: [string, number, number][], who: string) {
