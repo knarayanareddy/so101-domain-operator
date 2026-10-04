@@ -78,16 +78,23 @@ function screwdriverBench(): Scenario {
 
   // Four screws on a spread chassis, plus one already removed.
   const SCREWS: { id: string; at: [number, number] }[] = [
-    { id: 'screw-1', at: [-26, 3] },
-    { id: 'screw-2', at: [0, -28] },
-    { id: 'screw-3', at: [6, -1] },
-    { id: 'screw-4', at: [-26, -24] },
+    { id: 'screw-1', at: [7, -21] },
+    { id: 'screw-2', at: [6, -8] },
+    { id: 'screw-3', at: [-8, -6] },
+    { id: 'screw-4', at: [-2, 4] },
   ];
-  const CHASSIS: [number, number] = [-24, -8];
-  const PARTS_TRAY: [number, number] = [-27, 1];
-  const BIT: [number, number] = [24, 4];
+  const CHASSIS: [number, number] = [-1, -8];
+  const PARTS_TRAY: [number, number] = [-7, -22];
+  const BIT: [number, number] = [20, 6];
 
-  assertReachable(A, SCREWS.map((s) => [s.id, s.at[0], s.at[1]]), 'screwdriver bench');
+  // BOTH arms must reach every screw: arm B drives the screwdriver, arm A picks the
+  // freed screw out. Asserting only arm A let screws 1 and 4 sit ~40 cm from arm B —
+  // outside its envelope — so the driver never engaged them and arm B appeared to do
+  // nothing on the first screw while arm A still retrieved it.
+  SCREWS.forEach((s) => {
+    assertReachable(A, [[s.id, s.at[0], s.at[1]]], 'screwdriver bench (arm A)');
+    assertReachable(B, [[s.id, s.at[0], s.at[1]]], 'screwdriver bench (arm B DRIVES)');
+  });
   assertReachable(A, [['chassis', CHASSIS[0], CHASSIS[1]]], 'screwdriver bench');
   assertReachable(A, [['tray', PARTS_TRAY[0], PARTS_TRAY[1]]], 'screwdriver bench');
   assertReachable(B, [['driver', BIT[0], BIT[1]]], 'screwdriver bench');

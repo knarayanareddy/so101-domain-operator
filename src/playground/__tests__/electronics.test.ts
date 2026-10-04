@@ -78,6 +78,22 @@ describe("electronics service bench", () => {
     expect(sd.code).toMatch(/load/i); // the real-hardware step the sim cannot fake
   });
 
+  it("EVERY screw is reachable by the arm that DRIVES it, not just the one that retrieves it", () => {
+    // Reported 2026-10-04: on screw-1 arm B never engaged the driver while arm A still
+    // grabbed it. Screws 1 and 4 sat ~40 cm from arm B, outside its envelope, and the
+    // scene only asserted arm A's reach. The generic reach test above PASSED during
+    // that bug because it accepted min(A, B).
+    const s = ALL_SCENARIOS.find((x) => x.id === "screwdriver-bench")!;
+    const screws = (s.props ?? []).filter((p) => p.grab);
+    expect(screws.length).toBe(4);
+    for (const p of screws) {
+      const dB = Math.hypot(p.pos[0] - B_BASE[0], p.pos[2] - B_BASE[2]);
+      const dA = Math.hypot(p.pos[0] - A_BASE[0], p.pos[2] - A_BASE[2]);
+      expect(dB <= 23.1, `${p.id} is ${dB.toFixed(1)} cm from arm B — the driver cannot reach it`).toBe(true);
+      expect(dA <= 23.1, `${p.id} is ${dA.toFixed(1)} cm from arm A — it cannot be retrieved`).toBe(true);
+    }
+  });
+
   it("the screwdriver has 4 screws to remove", () => {
     const s = ALL_SCENARIOS.find((x) => x.id === "screwdriver-bench")!;
     expect((s.props ?? []).filter((p) => p.grab).length).toBe(4);
