@@ -62,7 +62,11 @@ function labelSprite(text: string) {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
-  const h = 2.4;
+  // 3.6 cm tall rather than 2.4. The showcase layouts now span ~60 cm, so the camera
+  // pulls back far enough that a 2.4 cm sprite was ~4 px and the labels were unreadable
+  // at exactly the distance judges view from. Labels are the thing that makes each
+  // part identifiable, so they scale with the scene rather than being tuned per view.
+  const h = 3.6;
   sp.scale.set((h * w) / 64, h, 1);
   sp.renderOrder = 10;
   return sp;

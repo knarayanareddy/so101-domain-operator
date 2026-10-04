@@ -15,7 +15,8 @@
  */
 
 import type { Scenario, LiveCtx, LiveOut, PropSpec } from "../sim/types";
-import { fbox, A_BASE } from "./dsl";
+import type { V3 } from "../sim/kinematics";
+import { fbox, A_BASE, B_BASE } from "./dsl";
 import { phoneUnderRepair } from "./parts3d";
 
 /** A pick request, or null when nothing is wanted. */
@@ -36,7 +37,14 @@ type Stage = "idle" | "to-source" | "descend" | "close" | "lift" | "to-pad" | "l
 let stage: Stage = "idle";
 let stageT = 0;
 let carried = false;
-let current: { id: string; mode: "pick" | "place"; from: [number, number]; to: [number, number] } | null = null;
+let current: {
+  id: string;
+  mode: "pick" | "place";
+  from: [number, number];
+  to: [number, number];
+  /** Which arm is executing. Two-arm domains route by proximity. */
+  arm: "a" | "b";
+} | null = null;
 /** Sequence the live program has already consumed, so a repeat can restart it. */
 let stageSeq = -1;
 
@@ -65,21 +73,52 @@ export function pendingPick(): PickRequest | null {
 const REACH = 24.2;
 const MARGIN = 1.1;
 
-/** Where an item is parked after a fetch — a fixed pad in front of the operator. */
-const PAD: Record<string, [number, number]> = {
-  "phone-repair": [A_BASE[0] + 9, A_BASE[2] - 5],
-  "pcb-assembly": [A_BASE[0] + 9, A_BASE[2] - 4],
-  "lab-samples": [A_BASE[0] + 9, A_BASE[2] - 5],
-  "assistive-handover": [A_BASE[0] + 16, A_BASE[2] - 6],
-  "restock-kiosk": [A_BASE[0] + 10, A_BASE[2] - 4],
+/**
+ * Where an item is parked after a fetch.
+ *
+ * Keyed BY ARM, because three of the five domains now spread their materials across
+ * the union of both reach envelopes (phone-repair 34.2 cm min separation, pcb 29.7).
+ * A single arm-A pad would put deliveries outside arm B's envelope and reintroduce
+ * exactly the thin-air grasp this module exists to prevent.
+ */
+const PAD: Record<string, Record<"a" | "b", [number, number]>> = {
+  "phone-repair": { a: [A_BASE[0] + 9, A_BASE[2] + 4], b: [B_BASE[0] - 9, B_BASE[2] + 4] },
+  "pcb-assembly": { a: [A_BASE[0] + 9, A_BASE[2] + 2], b: [B_BASE[0] - 9, B_BASE[2] + 2] },
+  "lab-samples": { a: [A_BASE[0] + 9, A_BASE[2] - 5], b: [B_BASE[0] - 9, B_BASE[2] - 5] },
+  "assistive-handover": { a: [A_BASE[0] + 13, A_BASE[2] + 6], b: [B_BASE[0] - 13, B_BASE[2] + 6] },
+  "restock-kiosk": { a: [A_BASE[0] + 10, A_BASE[2] - 4], b: [B_BASE[0] - 10, B_BASE[2] - 4] },
 };
 
-function padFor(scenarioId: string): [number, number] {
-  return PAD[scenarioId] ?? [A_BASE[0] + 9, A_BASE[2] - 5];
+function padFor(scenarioId: string, arm: "a" | "b"): [number, number] {
+  const e = PAD[scenarioId]?.[arm];
+  if (e) return e;
+  return arm === "b" ? [B_BASE[0] - 9, B_BASE[2] + 4] : [A_BASE[0] + 9, A_BASE[2] + 4];
 }
 
-function hoverAt(x: number, z: number, want = 7): number {
-  const d = Math.hypot(x - A_BASE[0], z - A_BASE[2]);
+/**
+ * Pick the arm that can actually reach a target, preferring the nearer one.
+ *
+ * This is the routing rule for the two-arm domains. Returns null only when NEITHER
+ * arm can reach, in which case the caller refuses rather than clamping — the same
+ * fail-closed rule as planPicks() on the live camera path.
+ */
+export function chooseArm(
+  x: number,
+  z: number,
+  allowB: boolean,
+): "a" | "b" | null {
+  const da = Math.hypot(x - A_BASE[0], z - A_BASE[2]);
+  if (!allowB) return da <= REACH - MARGIN ? "a" : null;
+  const db = Math.hypot(x - B_BASE[0], z - B_BASE[2]);
+  const aOk = da <= REACH - MARGIN;
+  const bOk = db <= REACH - MARGIN;
+  if (!aOk && !bOk) return null;
+  if (aOk && bOk) return da <= db ? "a" : "b";
+  return aOk ? "a" : "b";
+}
+
+function hoverAt(x: number, z: number, base: V3, want = 7): number {
+  const d = Math.hypot(x - base[0], z - base[2]);
   const m = Math.sqrt(Math.max(REACH * REACH - d * d, 0)) - MARGIN;
   return Math.max(3.5, Math.min(want, m));
 }
@@ -114,12 +153,14 @@ function reset(): void {
  */
 export function singlePickProgram(s: Scenario): (ctx: LiveCtx) => LiveOut {
   const grabbables = (s.props ?? []).filter((p) => p.grab);
-  const pad = padFor(s.id);
+  const allowB = s.arms === 2;
   const byId = new Map<string, PropSpec>(grabbables.map((p) => [p.id, p]));
 
-  const resetPose: LiveOut = {
+  /** Both arms parked unless one is working. */
+  const resetPose = (): LiveOut => ({
     a: { p: [A_BASE[0] + 13, 9, A_BASE[2] + 4], pitch: -60, grip: 1 },
-  };
+    ...(allowB ? { b: { p: [B_BASE[0] - 13, 9, B_BASE[2] + 4], pitch: -60, grip: 1 } } : {}),
+  });
 
   return function tick(ctx: LiveCtx): LiveOut {
     // a new request supersedes whatever was in flight
@@ -127,15 +168,24 @@ export function singlePickProgram(s: Scenario): (ctx: LiveCtx) => LiveOut {
       const prop = byId.get(request.propId);
       if (!prop) {
         // asked for something this scenario does not place: say so and stay put
-        return { ...resetPose, say: `"${request.propId}" is not in this scenario` };
+        return { ...resetPose(), say: `"${request.propId}" is not in this scenario` };
       }
       stageSeq = request.seq;
-      const to = request.mode === "place" ? pad : pad;
+      const from: [number, number] = [prop.pos[0], prop.pos[2]];
+      const arm = chooseArm(from[0], from[1], allowB);
+      if (!arm) {
+        // Neither arm can reach it. Say so and stay put — never clamp the target
+        // into range, which is how the arm ends up grasping empty table.
+        current = null;
+        stage = "done";
+        return { ...resetPose(), say: `"${prop.label}" is out of both arms' reach` };
+      }
       current = {
         id: prop.id,
         mode: request.mode,
-        from: [prop.pos[0], prop.pos[2]],
-        to,
+        from,
+        to: padFor(s.id, arm),
+        arm,
       };
       stage = "to-source";
       stageT = 0;
@@ -145,14 +195,25 @@ export function singlePickProgram(s: Scenario): (ctx: LiveCtx) => LiveOut {
     if (!current || stage === "idle" || stage === "done") {
       // Nothing requested, or the pick already finished: HOLD. This is the
       // behaviour the panel was missing — no auto-advance to the next item.
-      return resetPose;
+      return resetPose();
     }
 
     stageT += ctx.dt;
     const [fx, fz] = current.from;
     const [tx, tz] = current.to;
-    const fh = hoverAt(fx, fz, 6.5);
-    const th = hoverAt(tx, tz, 6.5);
+    const base: V3 = current.arm === "a" ? A_BASE : B_BASE;
+    const fh = hoverAt(fx, fz, base, 6.5);
+    const th = hoverAt(tx, tz, base, 6.5);
+    /** Park the idle arm so it does not drift while the other works. */
+    const idle: LiveOut = current.arm === "a"
+      ? (allowB ? { b: { p: [B_BASE[0] - 13, 9, B_BASE[2] + 4], pitch: -60, grip: 1 } } : {})
+      : { a: { p: [A_BASE[0] + 13, 9, A_BASE[2] + 4], pitch: -60, grip: 1 } };
+    const on = (pose: {
+      p: [number, number, number];
+      pitch: number;
+      grip: number;
+      say?: string;
+    }): LiveOut => (current!.arm === "a" ? { a: pose, ...idle } : { b: pose, ...idle });
 
     switch (stage) {
       case "to-source":
@@ -167,7 +228,7 @@ export function singlePickProgram(s: Scenario): (ctx: LiveCtx) => LiveOut {
           stage = "close";
           stageT = 0;
         }
-        return { a: { p: [fx, 1.6, fz], pitch: -90, grip: 0 } };
+        return on({ p: [fx, 1.6, fz], pitch: -90, grip: 0 });
 
       case "close":
         carried = true;
@@ -175,28 +236,28 @@ export function singlePickProgram(s: Scenario): (ctx: LiveCtx) => LiveOut {
           stage = "lift";
           stageT = 0;
         }
-        return { a: { p: [fx, 1.6, fz], pitch: -90, grip: 1 }, say: "   ✓ grasp verified" };
+        return on({ p: [fx, 1.6, fz], pitch: -90, grip: 1, say: "   ✓ grasp verified" });
 
       case "lift":
         if (stageT >= DUR.lift) {
           stage = "to-pad";
           stageT = 0;
         }
-        return { a: { p: [fx, fh, fz], pitch: -90, grip: 1 } };
+        return on({ p: [fx, fh, fz], pitch: -90, grip: 1 });
 
       case "to-pad":
         if (stageT >= DUR["to-pad"]) {
           stage = "lower";
           stageT = 0;
         }
-        return { a: { p: [tx, th, tz], pitch: -90, grip: 1 } };
+        return on({ p: [tx, th, tz], pitch: -90, grip: 1 });
 
       case "lower":
         if (stageT >= DUR.lower) {
           stage = "release";
           stageT = 0;
         }
-        return { a: { p: [tx, 2.0, tz], pitch: -90, grip: 1 } };
+        return on({ p: [tx, 2.0, tz], pitch: -90, grip: 1 });
 
       case "release":
         carried = false;
@@ -204,10 +265,10 @@ export function singlePickProgram(s: Scenario): (ctx: LiveCtx) => LiveOut {
           stage = "done";
           stageT = 0;
         }
-        return { a: { p: [tx, 2.0, tz], pitch: -90, grip: 0 }, say: "   ✓ placed — say the next item or 'run the work order'" };
+        return on({ p: [tx, 2.0, tz], pitch: -90, grip: 0, say: "   ✓ placed — say the next item or 'run the work order'" });
 
       default:
-        return resetPose;
+        return resetPose();
     }
   };
 }
@@ -232,8 +293,13 @@ function labelOf(byId: Map<string, PropSpec>, id: string): string {
  * is visible.
  */
 export function withSinglePick(s: Scenario): Scenario {
-  const pad = padFor(s.id);
-  const fixtures = [...(s.fixtures ?? []), fbox(pad[0], 0.15, pad[1], 7, 0.3, 6, 0x2f7d4f, { label: 'fetch pad' })];
+  const pa = padFor(s.id, "a");
+  const pb = padFor(s.id, "b");
+  const fixtures = [
+    ...(s.fixtures ?? []),
+    fbox(pa[0], 0.15, pa[1], 7, 0.3, 6, 0x2f7d4f, { label: "fetch pad A" }),
+    ...(s.arms === 2 ? [fbox(pb[0], 0.15, pb[1], 7, 0.3, 6, 0x2563a8, { label: "fetch pad B" })] : []),
+  ];
   const live: Scenario = {
     ...s,
     id: `${s.id}-single`,
@@ -244,7 +310,6 @@ export function withSinglePick(s: Scenario): Scenario {
     howTo: [...s.howTo, 'Single-pick mode: choose one item (or speak its name). The arm fetches it and waits.'],
     program: { kind: 'live', fn: singlePickProgram(s) },
   };
-  (live as Scenario & { pad?: [number, number] }).pad = pad;
   return live;
 }
 

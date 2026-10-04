@@ -292,3 +292,79 @@ describe("layout spread: parts must be individually readable", () => {
     }
   });
 });
+
+
+describe("two-arm spread: materials exceed a single arm's envelope", () => {
+  const d = (p: [number, number], b: [number, number]) => Math.hypot(p[0] - b[0], p[1] - b[1]);
+  const A: [number, number] = [A_BASE[0], A_BASE[2]];
+  const B: [number, number] = [B_BASE[0], B_BASE[2]];
+  const LIM = 23.1;
+
+  const twoArm = ["phone-repair", "pcb-assembly", "assistive-handover"];
+
+  it("the three spread domains are two-arm", () => {
+    for (const id of twoArm) {
+      expect(showcaseById(id)!.arms, `${id} should use both arms`).toBe(2);
+    }
+  });
+
+  it("every part is reachable by AT LEAST ONE arm, and by its assigned arm in the script", () => {
+    for (const id of twoArm) {
+      const s = showcaseById(id)!;
+      for (const p of s.props ?? []) {
+        if (!p.grab) continue;
+        const pt: [number, number] = [p.pos[0], p.pos[2]];
+        const da = d(pt, A);
+        const db = d(pt, B);
+        expect(
+          Math.min(da, db) <= LIM,
+          `${id}/${p.id} unreachable by both arms (A ${da.toFixed(1)} / B ${db.toFixed(1)})`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("spread is wide enough that ONE arm could not have served it", () => {
+    // The point of going two-arm: at least one part per domain sits outside A alone.
+    for (const id of twoArm) {
+      const s = showcaseById(id)!;
+      const farFromA = (s.props ?? [])
+        .filter((p) => p.grab)
+        .filter((p) => d([p.pos[0], p.pos[2]], A) > LIM);
+      expect(farFromA.length, `${id}: nothing forces arm B`).toBeGreaterThan(0);
+    }
+  });
+
+  it("min separation improved substantially", () => {
+    const minGap = (id: string) => {
+      const pts = (showcaseById(id)!.props ?? []).filter((p) => p.grab).map((p) => [p.pos[0], p.pos[2]] as [number, number]);
+      return Math.min(...pts.flatMap((p, i) => pts.map((q, j) => (i < j ? Math.hypot(p[0] - q[0], p[1] - q[1]) : Infinity))));
+    };
+    expect(minGap("phone-repair")).toBeGreaterThan(24);
+    expect(minGap("pcb-assembly")).toBeGreaterThan(22);
+    expect(minGap("assistive-handover")).toBeGreaterThan(24);
+  });
+
+  it("label cards still do not sit on top of a part", () => {
+    for (const id of twoArm) {
+      const s = showcaseById(id)!;
+      const cards = (s.fixtures ?? []).filter((f) => f.label && /battery|screen|logic board|sample|crate|resistor|capacitor|LED/i.test(f.label));
+      for (const c of cards) {
+        const on = (s.props ?? []).some((p) => Math.hypot(c.pos[0] - p.pos[0], c.pos[2] - p.pos[2]) < 2.5);
+        expect(on, `${id}: card "${c.label}" overlaps a part`).toBe(false);
+      }
+    }
+  });
+
+  it("fetch pads exist per arm so deliveries stay in that arm's envelope", () => {
+    for (const id of twoArm) {
+      const v = ALL_SCENARIOS.find((x) => x.id === `${id}-single`)!;
+      const pads = (v.fixtures ?? []).filter((f) => /fetch pad/.test(f.label ?? ""));
+      expect(pads.length, `${id}: expected a pad per arm`).toBe(v.arms === 2 ? 2 : 1);
+      for (const pad of pads) {
+        const pt: [number, number] = [pad.pos[0], pad.pos[2]];
+        expect(Math.min(d(pt, A), d(pt, B)) <= LIM, `${id}: pad "${pad.label}" out of reach`).toBe(true);
+      }
+    }
+  });
+});

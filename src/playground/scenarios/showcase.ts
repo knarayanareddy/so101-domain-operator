@@ -68,14 +68,22 @@ function frame(points: [number, number][]): { pos: [number, number, number]; tar
   const spanX = Math.max(...xs) - Math.min(...xs);
   const spanZ = Math.max(...zs) - Math.min(...zs);
   const span = Math.max(spanX, spanZ);
-  // Pull back far enough that BOTH arm rigs fit either side of the work area.
-  // The arms sit ~12 cm either side of centre and stand ~35 cm tall, so the
-  // working distance has to clear that, not just the table.
-  const dist = Math.max(span * 1.6, 46) + 46;
-  const height = dist * 0.82;
+  /**
+   * Pull back far enough for BOTH the work area AND the arm rigs.
+   *
+   * The three two-arm domains now spread materials across the union of both reach
+   * envelopes — phone-repair spans 60 cm in x, assistive ~45 cm. The previous
+   * `span * 1.6` was tuned when a single arm served everything and the layouts were
+   * ~30 cm, so the camera cropped the outermost parts and put the arms at the frame
+   * edge. Distance now scales with the true diagonal and keeps a floor.
+   *
+   * Both bases are included in the caller's point list, so `span` already accounts
+   * for the arms; the extra term clears their ~35 cm height.
+   */
+  const dist = span * 1.35 + 52;
   return {
-    pos: [cx - 6, height, cz - dist * 0.68],
-    target: [cx, 2, cz],
+    pos: [cx * 0.35, Math.max(38, dist * 0.82), cz * 0.35 + dist * 0.52],
+    target: [cx * 0.5, 0, cz * 0.5],
   };
 }
 
@@ -98,52 +106,64 @@ function assertReachable(arm: 'a' | 'b', pts: [string, number, number][], who: s
  *    One arm: technician's bench on the arm's own side.
  * ===================================================================== */
 function phoneRepair(): Scenario {
-  const ARM = 'a' as const;
-  // Spread far apart on purpose: at a judging distance the three parts must be
-  // individually readable, and their labels must not collide. Solved for maximum
-  // separation inside arm A's 23.1 cm envelope (min gap 30 cm, all >= 3 cm clear
-  // of the limit) rather than eyeballed.
-  const SPOT = { battery: [-18, -28], screen: [8, -13], board: [-18, 2] } as const;
-  const MAT_SPOT: [number, number] = [-4, -20];
-  const TRAY_LABEL_OFF: [number, number] = [4.2, 0];
+  // TWO arms. The three parts are spread across the union of both reach envelopes
+  // (34.2 cm min separation, up from 13.9 with one arm) so each is individually
+  // readable at a judging distance. Each part names the arm that fetches it.
+  const A = 'a' as const;
+  const B = 'b' as const;
+  const SPOT = {
+    battery: { at: [5, -30] as const, arm: B },
+    screen: { at: [-29, -24] as const, arm: A },
+    board: { at: [31, -7] as const, arm: B },
+  };
+  const MAT: [number, number] = [-4, 3];
+  const MAT_ARM = A;
 
   const PARTS = [
-    { id: 'part-battery', label: 'battery', color: 0x4a7fe0, spot: SPOT.battery },
-    { id: 'part-screen', label: 'screen', color: 0x4dab5f, spot: SPOT.screen },
-    { id: 'part-board', label: 'logic board', color: 0xe05252, spot: SPOT.board },
+    { id: 'part-battery', label: 'battery', spot: SPOT.battery },
+    { id: 'part-screen', label: 'screen', spot: SPOT.screen },
+    { id: 'part-board', label: 'logic board', spot: SPOT.board },
   ];
-  PARTS.forEach((p) => assertReachable(ARM, [[p.id, p.spot[0], p.spot[1]]], 'phone-repair'));
+  // Every part must be reachable by the arm that fetches it.
+  PARTS.forEach((p) =>
+    assertReachable(p.spot.arm, [[p.id, p.spot.at[0], p.spot.at[1]]], 'phone-repair'),
+  );
+  assertReachable(MAT_ARM, [['mat', MAT[0], MAT[1]]], 'phone-repair mat');
 
-  // Each part is its OWN component geometry — a battery pouch, a cover-glass
-  // screen, a populated logic board. Not three boxes in three colours.
   const BUILDERS = [phoneBattery, phoneScreen, logicBoard];
   const props: PropSpec[] = PARTS.map((p, i) => {
     const b = BUILDERS[i]();
-    return { id: p.id, ...at(b.prim, p.spot[0], 0, p.spot[1]), grab: true, width: b.grabWidth } as PropSpec;
+    return {
+      id: p.id,
+      ...at(b.prim, p.spot.at[0], 0, p.spot.at[1]),
+      grab: true,
+      width: b.grabWidth,
+    } as PropSpec;
   });
 
-  const [mx, mz] = MAT_SPOT;
-  assertReachable(ARM, [['mat', mx, mz]], 'phone-repair mat');
-
+  const [mx, mz] = MAT;
   const fixtures: FixtureSpec[] = [
     fbox(mx, 0.2, mz, 9, 0.4, 7, 0x2b2f36, { label: 'work mat' }),
     at(phoneUnderRepair(), mx, 0, mz),
   ];
-  // One label card per part, offset so the three never overlap on screen.
+  // Label card offset beside each part so the three never overlap on screen.
   PARTS.forEach((p) =>
     fixtures.push(
-      fbox(p.spot[0] + TRAY_LABEL_OFF[0], 1.0, p.spot[1] + TRAY_LABEL_OFF[1], 2.2, 2.0, 0.2, 0xf1f3f5, {
-        label: p.label,
-      }),
+      fbox(p.spot.at[0] - 4.6, 1.0, p.spot.at[1] + 2.4, 2.2, 2.0, 0.2, 0xf1f3f5, { label: p.label }),
     ),
   );
 
-  const phases: Phase[] = [wait(0.7, '📋 Work order open: screen replacement, 3 parts spread across the bench')];
+  const phases: Phase[] = [
+    wait(0.7, '📋 Work order open: screen replacement · parts spread across BOTH arms\' reach'),
+  ];
   PARTS.forEach((p, i) => {
     phases.push(
-      ...pickPlace(ARM, [p.spot[0], p.spot[1]], [mx, mz], {
+      ...pickPlace(p.spot.arm, [p.spot.at[0], p.spot.at[1]], [mx, mz], {
         speed: 0.85, fh: 1.4, th: 2.0, safe: 7,
-        say: i === 0 ? '🗣️ "Next: battery." → arm fetches from the bench' : `step ${i + 1}/3 · ${p.label}`,
+        say:
+          i === 0
+            ? `🗣️ "Next: battery." → arm ${p.spot.arm.toUpperCase()} fetches from across the bench`
+            : `step ${i + 1}/3 · ${p.label} · arm ${p.spot.arm.toUpperCase()}`,
       }),
     );
     phases.push(wait(0.35, `   ✓ stall-verified grasp · ledger step ${i + 1} recorded`));
@@ -155,27 +175,28 @@ function phoneRepair(): Scenario {
     title: 'Mobile Phone Repair',
     emoji: '🔧',
     category: 'Industry & Testing',
-    tagline: 'Parts-tray fetch in checklist order, with a verified ledger',
+    tagline: 'Two arms, parts spread wide, verified ledger',
     story:
-      'A technician works a repair order at the bench. Three parts — a battery pouch, a cover-glass screen and a populated logic board — are laid out well apart on the bench so each is individually visible. The arm fetches each one in checklist order, verifies the grasp by motor load, and writes one ledger entry per step recording what was done and which input proved it.',
+      'A technician works a repair order. Three parts — a battery pouch, a cover-glass screen and a populated logic board — are laid out well apart across the bench, far enough that each is individually visible from a judging distance. Two arms fetch them in checklist order, each taking whichever part is nearest to it, verify the grasp by motor load, and write one ledger entry per step recording what was done and which input proved it.',
     novelty:
       'The deliverable is not the pick — it is the record. Every verdict names its evidence, and an input that could not be checked yields "unknown", never a false pass.',
     difficulty: 2,
-    arms: 1,
-    hardware: ['Battery, screen and logic board (3D component models, laid out apart)', 'Optional Atech VL53L5CX distance sensor over the bench', 'Microphone (voice)', 'Overhead camera (colour detection + homography)'],
+    arms: 2,
+    hardware: ['Battery, screen and logic board (3D component models), laid out apart', 'Optional Atech VL53L5CX distance sensor over the bench', 'Microphone (voice)', 'Overhead camera (colour detection + homography)'],
     approach:
-      'Scripted pick & place + closed-loop verification via motor stall, then a ledger whose verdict is pass / fail / unknown with the evidence source recorded.',
+      'Scripted pick & place + closed-loop verification via motor stall, then a ledger whose verdict is pass / fail / unknown with the evidence source recorded. Parts are spread across the union of both reach envelopes, so each arm is assigned by proximity.',
     howTo: [
       'Lay the three parts far apart on the bench, each on its own taped mark, so they read individually from a judging distance.',
       'Tape a work mat in front of the technician for delivery.',
       'Calibrate the camera homography once with 4+ marks on the table plane.',
-      'Run: the arm picks each part in order and writes one ledger entry per step.',
+      'Run: each arm fetches the part nearest to it and records one ledger entry per step.',
     ],
     code: `for step in work_order.steps:
     part = vision.locate(step.part, rgb=step.rgb)        # colour + homography -> world cm
     if part is None:
         ledger.record(step, "fail", reason="part not on table"); continue
-    ok = arm.pick(part.world)                             # stall-verified grasp
+    arm = nearest_arm(part.world)                       # assign by proximity
+    ok = arm.pick(part.world)                            # stall-verified grasp
     if not ok:
         ledger.record(step, "fail", reason="grasp/slip check failed"); continue
     occ = distance.tray_occupancy(step.slot)              # optional sensor
@@ -184,7 +205,7 @@ function phoneRepair(): Scenario {
     theme: 'lab',
     props,
     fixtures,
-    cam: frame([[-18, -28], [8, -13], [-18, 2], [mx, mz]]),
+    cam: frame([[5, -30], [-29, -24], [31, -7], [mx, mz], [-12, -12], [12, -12]]),
     program: { kind: 'phases', phases, loop: true },
   };
 }
@@ -196,46 +217,55 @@ function phoneRepair(): Scenario {
 function pcbAssembly(): Scenario {
   const A = 'a' as const;
   const B = 'b' as const;
-  // Reels spread ~31 cm apart so each is readable, not a row of three discs.
-  const SPOT = { resistors: [-24, -27], capacitors: [5, -16], leds: [-19, 4] } as const;
-  const BOARD: [number, number] = [-2, -14];
-  const HOLD: [number, number] = [6, -6];
-
+  // Spread 29.7 cm across the union of both envelopes (was 7.3 cm on one arm).
   const REELS = [
-    { id: 'reel-r', label: '0402 resistors', color: 0xd9a441, spot: SPOT.resistors },
-    { id: 'reel-c', label: '0402 capacitors', color: 0x5f8fd9, spot: SPOT.capacitors },
-    { id: 'reel-led', label: 'LEDs', color: 0xe06a5f, spot: SPOT.leds },
+    { id: 'reel-r', label: '0402 resistors', color: 0xd9a441, at: [-8, -31] as const, arm: A },
+    { id: 'reel-c', label: '0402 capacitors', color: 0x5f8fd9, at: [23, -26] as const, arm: B },
+    { id: 'reel-led', label: 'LEDs', color: 0xe06a5f, at: [-32, -12] as const, arm: A },
   ];
-  REELS.forEach((r) => assertReachable(A, [[r.id, r.spot[0], r.spot[1]]], 'pcb src'));
-  assertReachable(A, [['board', BOARD[0], BOARD[1]]], 'pcb board');
-  assertReachable(B, [['holder', HOLD[0], HOLD[1]]], 'pcb holder');
+  const BOARD: { at: [number, number]; arm: 'a' | 'b' } = { at: [18, 9], arm: B };
+  const HOLDER: { at: [number, number]; arm: 'a' | 'b' } = { at: [-12, 10], arm: A };
 
-  // Proper component reels: a flanged spool with a hub window and spokes.
+  REELS.forEach((r) => assertReachable(r.arm, [[r.id, r.at[0], r.at[1]]], 'pcb reel'));
+  assertReachable(BOARD.arm, [['board', BOARD.at[0], BOARD.at[1]]], 'pcb board');
+  assertReachable(HOLDER.arm, [['holder', HOLDER.at[0], HOLDER.at[1]]], 'pcb holder');
+
   const props: PropSpec[] = REELS.map((r) => {
     const reel = componentReel(r.color);
-    return { id: r.id, ...at(reel.prim, r.spot[0], 0, r.spot[1]), label: r.label, grab: true, width: reel.grabWidth } as PropSpec;
+    return {
+      id: r.id,
+      ...at(reel.prim, r.at[0], 0, r.at[1]),
+      label: r.label,
+      grab: true,
+      width: reel.grabWidth,
+    } as PropSpec;
   });
 
   const fixtures: FixtureSpec[] = [
-    fbox(BOARD[0], 0.35, BOARD[1], 6, 0.5, 4.5, 0x1d5c3a, { label: 'PCB' }),
-    fbox(HOLD[0], 1.0, HOLD[1], 1.6, 2.0, 1.6, 0x2b3038, { label: 'board holder' }),
+    fbox(BOARD.at[0], 0.35, BOARD.at[1], 6, 0.5, 4.5, 0x1d5c3a, { label: 'PCB' }),
+    fbox(HOLDER.at[0], 1.0, HOLDER.at[1], 1.6, 2.0, 1.6, 0x2b3038, { label: 'board holder' }),
   ];
-  // Label card beside each reel, offset so the three never overlap on screen.
   REELS.forEach((r) =>
-    fixtures.push(fbox(r.spot[0] + 3.4, 1.1, r.spot[1], 2.6, 2.2, 0.2, 0xf1f3f5, { label: r.label })),
+    fixtures.push(fbox(r.at[0] - 3.4, 1.1, r.at[1] - 2.6, 2.6, 2.2, 0.2, 0xf1f3f5, { label: r.label })),
   );
 
-  const phases: Phase[] = [wait(0.7, '📐 Assembly order loaded · arm B steadies the board')];
+  const phases: Phase[] = [wait(0.7, '📐 Assembly order loaded · both arms kitting in parallel')];
   REELS.forEach((r, i) => {
     phases.push(
-      ...pickPlace(A, [r.spot[0], r.spot[1]], [BOARD[0] - 1.4 + i * 1.4, BOARD[1]], {
+      ...pickPlace(r.arm, [r.at[0], r.at[1]], [BOARD.at[0] - 1.4 + i * 1.4, BOARD.at[1]], {
         speed: 0.7, fh: 1.2, th: 1.6, safe: 7,
-        say: i === 0 ? '🗣️ "Pass the resistor pack." → same vision, same grasp' : `place ${r.label} at footprint ${i + 1}`,
+        say:
+          i === 0
+            ? `🗣️ "Pass the resistor pack." → arm ${r.arm.toUpperCase()} takes it, the other steadies the board`
+            : `place ${r.label} at footprint ${i + 1} · arm ${r.arm.toUpperCase()}`,
       }),
     );
     phases.push(wait(0.3, `   ✓ placed · ledger step ${i + 1}/3`));
   });
-  phases.push(P(B, 1.2, { p: [HOLD[0], 2.6, HOLD[1]], pitch: -70, grip: 1 }, '   🤝 arm B holds the board until the step is signed off'));
+  phases.push(
+    P(HOLDER.arm, 1.2, { p: [HOLDER.at[0], 2.6, HOLDER.at[1]], pitch: -70, grip: 1 },
+      `   🤝 arm ${HOLDER.arm.toUpperCase()} holds the board until the step is signed off`),
+  );
   phases.push(wait(0.7, '⚠️ Out-of-order step → flagged BEFORE the board is closed'));
 
   return {
@@ -243,34 +273,35 @@ function pcbAssembly(): Scenario {
     title: 'PCB Assembly Kitting',
     emoji: '🔌',
     category: 'Industry & Testing',
-    tagline: 'Two arms: one kits, one steadies the board',
+    tagline: 'Both arms kitting in parallel, reels spread wide',
     story:
-      'A bench technician builds a board from three component reels laid out well apart on the bench — resistors, capacitors, LEDs — each a real flanged spool. Arm A fetches them in assembly order and places them at footprints while arm B holds the board steady. The value is not the pick: a step done out of order, or with the wrong reel, is flagged while the board is still open.',
+      'A bench technician builds a board from three component reels laid out well apart across the bench — resistors, capacitors, LEDs — each a real flanged spool. The two arms fetch them in assembly order, each taking whichever reel is nearest to it, and place them at footprints while one arm holds the board steady. The value is not the pick: a step done out of order, or with the wrong reel, is flagged while the board is still open.',
     novelty:
-      'Proves the methodology is domain-independent AND that two arms earn their place for a reason other than spectacle: a steadying hand is a real production job.',
+      'Proves the methodology is domain-independent AND that two arms earn their place for a reason other than spectacle: one steadies while the other kits, and the reels are too far apart for a single arm to serve.',
     difficulty: 2,
     arms: 2,
-    hardware: ['Three component reels (3D spools), laid out apart', 'PCB on a holder', 'Overhead camera', 'Optional distance sensor for reel-present check', 'Second arm as board holder'],
+    hardware: ['Three component reels (3D spools), laid out apart', 'PCB on a holder', 'Overhead camera', 'Optional distance sensor for reel-present check', 'Two arms: one kitting, one holding'],
     approach:
-      'Same colour-threshold detection and stall-verified grasp as the repair bench. Arm B holds rather than picks.',
+      'Same colour-threshold detection and stall-verified grasp as the repair bench. Reels are assigned to arms by proximity because the layout exceeds one arm\'s envelope.',
     howTo: [
-      'Lay one component reel per taped mark, far apart, so each reads individually.',
-      'Place the bare PCB on the holder; arm B holds it while arm A works.',
+      'Lay one component reel per taped mark, far apart — beyond a single arm\'s reach so both are used.',
+      'Place the bare PCB on the holder; one arm holds it while the other kits.',
       'Load the assembly order; each step names a reel and a footprint.',
-      'Run: arm A fetches each reel in order and records placement.',
+      'Run: each arm fetches the reel nearest to it and records placement.',
     ],
     code: `order = work_instruction.steps
-board_holder.hold(PCB)                    # arm B: steady, do not release
+board_holder.hold(PCB)                    # one arm steadies, does not release
 for i, (reel, footprint) in enumerate(order):
     if tray_occupancy(reel) is False:
         ledger.record(i, "fail", reason=f"{reel} missing — wrong reel fetched")
     part = vision.locate(reel_rgb[reel], tol=40)
-    kitting_arm.pick(part.world) and kitting_arm.place(footprint)
+    arm = nearest_arm(part.world)          # reels are spread past one arm's reach
+    arm.pick(part.world) and arm.place(footprint)
     ledger.record(i, "pass")`,
     theme: 'lab',
     props,
     fixtures,
-    cam: frame([[-24, -27], [5, -16], [-19, 4], HOLD]),
+    cam: frame([[-8, -31], [23, -26], [-32, -12], HOLDER.at, [-12, -12], [12, -12]]),
     program: { kind: 'phases', phases, loop: true },
   };
 }
@@ -360,47 +391,53 @@ function labSamples(): Scenario {
 function assistiveHandover(): Scenario {
   const A = 'a' as const;
   const B = 'b' as const;
-  // Cup and magazine 40 cm apart so both are unmistakable, then two clearly
-  // separated handover marks.
-  const CUP: [number, number] = [-11, -32];
-  const MAG: [number, number] = [-14, 8];
-  const HANDOFF: [number, number] = [-2, -12];   // robot <-> robot
-  const HUMAN: [number, number] = [6, 2];       // robot -> person
-  assertReachable(A, [['cup', ...CUP]], 'assistive cup');
-  assertReachable(A, [['magazine', ...MAG]], 'assistive magazine');
+  // Materials spread to opposite ends: cup on arm B's side, magazine on arm A's.
+  const CUP: { at: [number, number]; arm: 'a' | 'b' } = { at: [14, -30], arm: B };
+  const MAG: { at: [number, number]; arm: 'a' | 'b' } = { at: [-23, -28], arm: A };
+  const HANDOFF: [number, number] = [-19, 6];  // robot <-> robot, arm A serves
+  const HUMAN: [number, number] = [18, 7];      // robot -> person, arm B serves
+  assertReachable(CUP.arm, [['cup', ...CUP.at]], 'assistive cup');
+  assertReachable(MAG.arm, [['magazine', ...MAG.at]], 'assistive magazine');
   assertReachable(A, [['handoff', ...HANDOFF]], 'assistive handoff');
-  assertReachable(B, [['handoff', ...HANDOFF]], 'assistive handoff (arm B)');
   assertReachable(B, [['human point', ...HUMAN]], 'assistive human point');
 
-  // A real cup with lid and straw, and a real magazine with a cover and spine.
   const cup = drinkCup();
   const mag = magazine();
   const props: PropSpec[] = [
-    { id: 'cup', ...at(cup.prim, CUP[0], 0, CUP[1]), grab: true, width: cup.grabWidth } as PropSpec,
-    { id: 'book', ...at(mag.prim, MAG[0], 0, MAG[1]), grab: true, width: mag.grabWidth } as PropSpec,
+    { id: 'cup', ...at(cup.prim, CUP.at[0], 0, CUP.at[1]), grab: true, width: cup.grabWidth } as PropSpec,
+    { id: 'book', ...at(mag.prim, MAG.at[0], 0, MAG.at[1]), grab: true, width: mag.grabWidth } as PropSpec,
   ];
 
+  // Each surface sits under its own item, so the two are unmistakably separate.
   const fixtures: FixtureSpec[] = [
     fcyl(HANDOFF[0], 0.03, HANDOFF[1], 3.2, 0.06, 0x2fa84f, { label: 'robot↔robot handover' }),
     fcyl(HUMAN[0], 0.03, HUMAN[1], 3.2, 0.06, 0x1f7ae0, { label: 'human handover' }),
-    fbox(HUMAN[0] - 5, 0.5, HUMAN[1], 5, 1.0, 5, 0x3f4750, { label: 'seat' }),
+    fbox(HUMAN[0] + 3, 0.5, HUMAN[1], 5, 1.0, 5, 0x3f4750, { label: 'seat' }),
+    fbox(CUP.at[0], 0.4, CUP.at[1], 6, 0.8, 6, 0x6b5545, { label: 'side table' }),
+    fbox(MAG.at[0], 0.25, MAG.at[1], 6, 0.5, 5, 0x4a5568, { label: 'coffee table' }),
   ];
-  // Side table under the cup only, so the magazine is clearly a separate surface.
-  fixtures.push(fbox(CUP[0], 0.4, CUP[1], 6, 0.8, 6, 0x6b5545, { label: 'side table' }));
-  fixtures.push(fbox(MAG[0], 0.25, MAG[1], 6, 0.5, 5, 0x4a5568, { label: 'coffee table' }));
 
-  const phases: Phase[] = [wait(0.8, '🔔 Voice request: "Here is your drink." — hands are the bottleneck')];
-  phases.push(...pickPlace(A, CUP, HANDOFF, {
+  const phases: Phase[] = [
+    wait(0.8, '🔔 Voice request: "Here is your drink." — the drink is on arm B\'s far side'),
+  ];
+  phases.push(...pickPlace(CUP.arm, CUP.at, HANDOFF, {
     speed: 0.65, fh: 1.6, th: 2.4, safe: 7,
-    say: '🤝 arm A picks the drink and hands it to arm B',
+    say: `🤝 arm ${CUP.arm.toUpperCase()} crosses the bench and hands the drink to arm A`,
   }));
   phases.push(wait(0.5, '   ✓ robot↔robot handover · both grasps stall-verified'));
-  phases.push(...pickPlace(B, HANDOFF, HUMAN, {
+  phases.push(...pickPlace(A, HANDOFF, HUMAN, {
     speed: 0.65, fh: 1.6, th: 2.4, safe: 7,
-    say: '🗣️ arm B delivers to the taped handover point',
+    say: '🗣️ arm A delivers to the taped handover point',
   }));
   phases.push(wait(0.6, '   ✓ handover complete · awaiting confirmation button'));
-  phases.push(P(B, 1.0, { p: [HUMAN[0] + 4, 8, HUMAN[1]], pitch: -60, grip: 1 }, '   …arm withdraws to rest'));
+  phases.push(P(A, 1.0, { p: [HANDOFF[0] - 5, 8, HANDOFF[1] - 4], pitch: -60, grip: 1 },
+    '   …arm A withdraws to rest'));
+  phases.push(
+    ...pickPlace(MAG.arm, MAG.at, [HUMAN[0], HUMAN[1]], {
+      speed: 0.65, fh: 1.2, th: 1.6, safe: 7,
+      say: `📰 arm ${MAG.arm.toUpperCase()} fetches the magazine from the far table — second item, second arm`,
+    }),
+  );
   phases.push(wait(0.8, '📄 Ledger: robot↔robot and robot→human, both timestamped'));
 
   return {
@@ -408,34 +445,35 @@ function assistiveHandover(): Scenario {
     title: 'Assistive Handover (robot → robot → human)',
     emoji: '🤲',
     category: 'Care & Assistive',
-    tagline: 'Two-stage handover: collaboration, then assistance',
+    tagline: 'Materials at opposite ends; two arms, two distinct roles',
     story:
-      'A person at a table asks for a drink by voice. Arm A picks it from the side table and hands it to arm B at a green taped point; arm B places it on the blue taped point within the person\'s reach, then withdraws. Two distinct claims in one scenario: robots can cooperate, and a robot can serve a person without occupying their space.',
+      'A person at a table asks for a drink by voice. The cup sits on a side table at arm B\'s far end, so arm B fetches it and hands it to arm A at a green taped point; arm A places it on the blue taped point within the person\'s reach, then withdraws. A magazine on a separate table at the opposite end is then fetched by arm B. Two claims in one scenario: robots can cooperate across a wide bench, and a robot can serve a person without occupying their space.',
     novelty:
-      'The two-arm handover is not decoration — it is the difference between showing coordination and showing assistance. Voice is the interface because the user\'s hands are the bottleneck. Both handover points are taped marks, NOT person detection.',
+      'The two-arm handover is not decoration — it is the difference between showing coordination and showing assistance. Items are spread past a single arm\'s reach, so each arm must be used. Voice is the interface because the user\'s hands are the bottleneck. Both handover points are taped marks, NOT person detection.',
     difficulty: 2,
     arms: 2,
-    hardware: ['Drink cup with lid and straw (3D), on a side table', 'Magazine (3D), on a coffee table', 'Two taped handover marks', 'Microphone', 'Optional button for confirmation'],
+    hardware: ['Drink cup with lid and straw (3D), on a side table', 'Magazine (3D), on a coffee table at the opposite end', 'Two taped handover marks', 'Microphone', 'Optional button for confirmation'],
     approach:
-      'Voice request → arm A fetch → robot↔robot handover → arm B delivery to a taped mark → withdraw.',
+      'Voice request → arm B fetches → robot↔robot handover to arm A → arm A delivers to a taped mark → withdraw → arm B fetches a second item.',
     howTo: [
       'Tape two marks: one between the arms for the robot↔robot handover, one in front of the person.',
-      'Put the cup on the side table and the magazine on the coffee table, far apart.',
+      'Put the cup and the magazine at OPPOSITE ends of the bench, beyond a single arm\'s reach.',
       'Connect a microphone; speak the request.',
       'Optionally add a button: the person confirms and the ledger records it.',
     ],
     code: `# What this does NOT do: detect people. Both marks are taped on the table.
 request = stt.listen()                        # voice in
 item = catalogue.match(request)              # "drink" -> cup
-arm_a.pick(item.world) and arm_a.place(ROBOT_HANDOVER_MARK)
-assert gripper_load > threshold               # arm B actually has it now
-arm_b.pick(ROBOT_HANDOVER_MARK) and arm_b.place(HUMAN_HANDOVER_MARK)
+arm_b.pick(item.world)                       # cup is on B's far side
+arm_b.place(ROBOT_HANDOVER_MARK)
+assert gripper_load > threshold               # arm A actually has it now
+arm_a.pick(ROBOT_HANDOVER_MARK) and arm_a.place(HUMAN_HANDOVER_MARK)
 ledger.record(request, "delivered", evidence="arm",
                confirmed=button.pressed())    # optional human confirmation`,
     theme: 'warm',
     props,
     fixtures,
-    cam: frame([CUP, MAG, HANDOFF, HUMAN]),
+    cam: frame([CUP.at, MAG.at, HANDOFF, HUMAN, [-12, -12], [12, -12]]),
     program: { kind: 'phases', phases, loop: true },
   };
 }

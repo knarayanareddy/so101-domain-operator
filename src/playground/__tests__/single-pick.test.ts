@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { A_BASE } from "../scenarios/dsl";
+import { A_BASE, B_BASE } from "../scenarios/dsl";
 import { showcaseScenarios, showcaseById } from "../scenarios/showcase";
 import { ALL_SCENARIOS } from "../scenarios";
 import {
@@ -8,6 +8,7 @@ import {
   pendingPick,
   resetPickState,
   withSinglePick,
+  chooseArm,
 } from "../scenarios/single-pick";
 import type { LiveCtx } from "../sim/types";
 
@@ -168,5 +169,74 @@ describe("scenario count", () => {
       expect(ALL_SCENARIOS.some((s) => s.id === id)).toBe(true);
       expect(ALL_SCENARIOS.some((s) => s.id === `${id}-single`)).toBe(true);
     }
+  });
+});
+
+describe("two-arm routing", () => {
+  const A: [number, number] = [A_BASE[0], A_BASE[2]];
+  const B: [number, number] = [B_BASE[0], B_BASE[2]];
+
+  it("chooseArm returns null when NEITHER arm can reach — never clamps", () => {
+    // far behind the bench, outside both envelopes
+    expect(chooseArm(-45, -60, true)).toBeNull();
+  });
+
+  it("chooseArm returns null for arm A when B is not allowed and A cannot reach", () => {
+    const far = [A[0] + 40, A[1] - 40] as [number, number];
+    expect(chooseArm(far[0], far[1], false)).toBeNull();
+  });
+
+  it("routes to the nearer arm when both can reach", () => {
+    expect(chooseArm(A[0] + 3, A[1] + 3, true)).toBe("a");
+    expect(chooseArm(B[0] - 3, B[1] + 3, true)).toBe("b");
+  });
+
+  it("routes across the bench for the spread domains", () => {
+    // phone-repair's battery sits at (5,-30): out of A's reach, inside B's.
+    expect(chooseArm(5, -30, true)).toBe("b");
+    // its screen at (-29,-24) is arm A's.
+    expect(chooseArm(-29, -24, true)).toBe("a");
+  });
+
+  it("a single-arm domain never routes to B", () => {
+    const s = showcaseById("lab-samples")!;
+    for (const p of s.props ?? []) {
+      if (!p.grab) continue;
+      const arm = chooseArm(p.pos[0], p.pos[2], s.arms === 2);
+      expect(arm, `${p.id} unroutable`).toBe("a");
+    }
+  });
+
+  it("drives arm B when the target is on B's side", () => {
+    resetPickState();
+    const s = showcaseById("phone-repair")!;
+    const fn = withSinglePick(s).program as { kind: "live"; fn: (c: LiveCtx) => unknown };
+    const ctx = makeCtx();
+    // battery is served by arm B in this scenario
+    requestPick("part-battery", "pick");
+
+    // Both keys are emitted every frame — the idle arm is explicitly parked so it
+    // cannot drift — so the discriminator is the WORKING height, not mere presence.
+    let bWorked = false;
+    let aWorked = false;
+    for (let i = 0; i < 400; i++) {
+      const out = fn.fn(ctx) as { a?: { p: number[] }; b?: { p: number[] } };
+      if (out.b && out.b.p[1] < 6) bWorked = true;   // descended toward the part
+      if (out.a && out.a.p[1] < 6) aWorked = true;
+    }
+    expect(bWorked, "arm B never moved toward the part").toBe(true);
+    expect(aWorked, "arm A should stay parked, not descend").toBe(false);
+  });
+
+  it("refuses a pick neither arm can reach and says so", () => {
+    resetPickState();
+    const s = showcaseById("phone-repair")!;
+    // move a part out of both envelopes
+    const broken = { ...s, props: (s.props ?? []).map((p) => (p.id === "part-battery" ? { ...p, pos: [-45, -60, 0] as [number, number, number] } : p)) };
+    const fn = withSinglePick(broken).program as { kind: "live"; fn: (c: LiveCtx) => unknown };
+    const ctx = makeCtx();
+    requestPick("part-battery", "pick");
+    const out = fn.fn(ctx) as { say?: string };
+    expect(out.say).toMatch(/reach/i);
   });
 });
